@@ -2,3 +2,4 @@ Bugsy
 pyes
 dateutil
 pytz
+hjson
