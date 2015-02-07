@@ -42,7 +42,7 @@
 #}
 
 import pyes
-import os
+import sys, os
 from pyes.es import ES
 import pytz
 from datetime import datetime
@@ -50,6 +50,12 @@ from dateutil.parser import parse
 from datetime import timedelta
 import bugsy
 import hjson as json
+
+DEBUG = True
+
+def debug(msg):
+    if DEBUG:
+        sys.stderr.write('+++ {}\n'.format(msg))
 
 def toUTC(suspectedDate, localTimeZone=None):
     '''Anything => UTC date. Magic.'''
@@ -129,41 +135,21 @@ def get_all_groups(vulns):
         groups += [i.asset.autogroup]
     return list(set(groups))
 
-def bug_create(asset, vuln):
+def bug_create(config, team, title, body):
     '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup' '''
-    #bz = bugsy.Bugsy(config['bugzilla']['user'], config['bugzilla']['pass'], config['bugzilla']['host'])
+    bz = bugsy.Bugsy(username=config['bugzilla']['user'],
+                     password=config['bugzilla']['pass'],
+                     bugzilla_url=config['bugzilla']['host'])
     bug = bugsy.Bug()
-
-    tpl_body = """{quickdesc}
-Expected time to patch: {time_to_patch} days (discovered {discovered} days ago)
-
-Risk: {risk}
-Access vector: {access_vector}
-Exploitable: {exploitable}
-Known public exploit: {exploit_available}
-
-Affected:
-{affected}
-"""
-
-    if ((bool(vuln.known_exploits) == True) or (bool(vuln.known_malware) == True)):
-        exploit_available_r = "Yes"
-    else:
-        exploit_available_r = "Unknown"
-
-    bug.summary = vuln.title+' - '
-    for i in vuln.cves:
-        bug.summary += i+' '
-
-    bug.add_comment(tpl_body.format(quickdesc   = vuln.title,
-                        time_to_patch           = vuln.patch_in,
-                        discovered              = vuln.age_days,
-                        risk                    = vuln.impact_label.upper(),
-                        access_vector           = vuln.cvss_vector.access_vector,
-                        exploitable             = "",
-                        exploit_available       = exploit_available_r,
-                        affected                = vuln.proof)
-                    )
+    bug.component = config['teamsetup'][team]['component']
+    bug.product = config['teamsetup'][team]['product']
+    bug.version = config['teamsetup'][team]['version']
+    bug.summary = title
+    bug.add_comment(body)
+    bz.put(bug)
+    bug.status = config['teamssetup'][team]['status']
+    bug.update()
+    debug('Created bug '+bug.id+' on '+bz.bugzilla_url)
 
 def main():
     #vulns_per_asset[assetid] = [vuln, vuln, ...]
@@ -173,6 +159,8 @@ def main():
     #This one is perhaps the most useful:
     #vulns_per_team['opsec'][{asset: <asset-data>, 'vulns': <vulns-for-that-asset>}, ...]
     vulns_per_team = dict()
+
+    debug('Debug mode on')
 
     with open('vuln2bugs.json') as fd:
         config = json.load(fd)
@@ -199,6 +187,15 @@ def main():
         vulns_per_team[team] = list()
         for asset in team_assets_with_vulns[team]:
             vulns_per_team[team] += [(assets[asset], vulns_per_asset[asset])]
+
+    if DEBUG:
+        debug('With the current filter:')
+        for team in teams:
+            x = 0
+            for i in vulns_per_team[team]:
+                x += len(i[1])
+            debug(team+': has '+str(x)+' vulnerabilities (' +
+                    str(len(team_assets_with_vulns[team]))+' assets).')
 
     import code
     code.interact(local=locals())
