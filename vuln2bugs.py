@@ -11,6 +11,7 @@
 #
 #{'asset': {'assetid': 410,
 #           'autogroup': 'opsec',
+#           'operator': 'none',
 #           'hostname': 'orangefactor1.dmz.phx1.mozilla.com',
 #           'ipv4address': '10.8.74.53',
 #           'macaddress': '005056942621',
@@ -50,6 +51,7 @@ from dateutil.parser import parse
 from datetime import timedelta
 import bugsy
 import hjson as json
+from io import StringIO
 from collections import Counter
 
 DEBUG = True
@@ -92,6 +94,12 @@ def get_entries(config, team):
     begindateUTC = toUTC(datetime.now() - timedelta(hours=td))
     enddateUTC= toUTC(datetime.now())
     fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
+    # Default filter - operator
+    try:
+        operator = config['teamsetup']['operator']
+    except KeyError:
+        debug('No operator defined, defaulting to any')
+        operator = None
 
     # Load team queries from our json config.
     # Lists are "should" unless an item is negated with "!" then it's must_not
@@ -184,21 +192,70 @@ def get_team_assets_with_vulns(raw, vulns_per_asset, assets):
 
     return team_assets_with_vulns
 
-def bug_create(config, team, title, body):
+def bug_create(config, teamcfg, title, body, attachments):
     '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup' '''
+    bzurl = config['bugzilla']['host'].strip('/')
     bz = bugsy.Bugsy(username=config['bugzilla']['user'],
                      password=config['bugzilla']['pass'],
-                     bugzilla_url=config['bugzilla']['host'])
+                     bugzilla_url=bzurl+'/rest')
     bug = bugsy.Bug()
-    bug.component = config['teamsetup'][team]['component']
-    bug.product = config['teamsetup'][team]['product']
-    bug.version = config['teamsetup'][team]['version']
+    bug.component = teamcfg['component']
+    bug.product = teamcfg['product']
+    bug.version = teamcfg['version']
     bug.summary = title
     bug.add_comment(body)
     bz.put(bug)
-    bug.status = config['teamssetup'][team]['status']
+    bug.status = teamcfg['status']
     bug.update()
-    debug('Created bug '+bug.id+' on '+bz.bugzilla_url)
+    create_attachment(bz.session, bzurl, bug, 'hostnames_only.txt', 'List of affected hostnames and their IPs',
+                    attachments[1])
+    create_attachment(bz.session, bzurl, bug, 'full_details.txt',
+                    'Complete details including CVEs, OS, etc. per hostname.', attachments[0])
+    debug('Created bug {}/{}'.format(bzurl, bug.id))
+
+def create_attachment(session, bzurl, bug, filename, description, attachment):
+    # The bugzilla API doesn't support much. Like attachments.
+    # So we're just hacking around here really.
+    """
+    session is python requests session (normally bz.session)
+    bzurl is the bugzilla base URL (not REST)
+    bug is a Bugsy bug to add the attachment to
+    filename is a filename of your choice, will appear as attached filename
+    description is the attachment description
+    attachment is a string, the attachement itsef. Will appear as text/plain file.
+    """
+    r = session.get('{}/attachment.cgi?bugid={}&action=enter'.format(bzurl, bug.id))
+    # Find the CSRF token. As dirty as it gets. This is hardcoded for simplicity.
+    # If things change, look at the page source to find it.
+    try:
+        pos = r.text.find('name="token"')
+        token = r.text[pos:pos+100].split('\n')[0]
+        token = token.split('"')[3]
+    except IndexError:
+        debug("Finding the attachment token has failed. Damn.")
+        return
+
+    # The attachement POST request has to look like this. The token is the one taken from the previous page, not the
+    # cookie token.
+    post_data = {'bugid': str(bug.id),
+            'action': 'insert',
+            'token': token,
+            'description': description,
+            'contenttypemethod': 'manual',
+            'contenttypeselection': 'text/plain',
+            'contenttypeentry': 'text/plain',
+            'flag_type-4': 'X',
+            'requestee_type-4': '',
+            'flag_type-607': 'X',
+            'requestee_type-607': '',
+            'flag_type-481': 'X',
+            'bug_status': bug.status,
+            'comment': '',
+            'needinfo_role': 'other',
+            'needinfo_from': ''}
+    file_data = {'data': (filename, StringIO(attachment))}
+    r = session.post(bzurl+'/attachment.cgi', data=post_data, files=file_data)
+    return r
 
 def parse_proof(proof):
     '''Finds a package name, os, etc. in a proof-style string, such as:
@@ -226,7 +283,11 @@ def parse_proof(proof):
     return {'pkg': pkg, 'os': osname, 'version': version}
 
 def process_vuln_flatmode(teamcfg, assets, vulns):
-    '''Outputs a short, flat-ish list of vulnerabilities per asset/system'''
+    '''Outputs a short, flat-ish text list of vulnerabilities per asset/system for use in attachments, text body, etc.'''
+    textdata = ''
+    hostnames = ''
+    pkg_affected = dict()
+
     # Unroll all vulns
     for a in assets:
         risks = list()
@@ -245,21 +306,26 @@ def process_vuln_flatmode(teamcfg, assets, vulns):
 
         #pkg_vuln = Counter(proofs).most_common()
         pkgs = list()
-        oses = list()
         pkg_parsed = True
         pkg_ver = dict()
         for i in proofs:
             p = parse_proof(i)
+            pname = p['pkg']
+            pver = p['version']
             if p == None:
                 pkg_parsed = False
                 pkgs += [i]
+                pkg_affected[i] = 'Unknown'
             else:
-                pkg_ver[p['pkg']] = p['version']
-                pkgs += [p['pkg']]
-                oses += [p['os']]
+                pkg_ver[pname] = pver
+                pkgs += [pname]
+                try:
+                    pkg_affected[pname] += [pver]
+                    pkg_affected[pname] = list(set(pkg_affected[pname]))
+                except KeyError:
+                    pkg_affected[pname] = [pver]
 
         # Uniquify
-        oses    = list(set(oses))
         pkgs    = list(set(pkgs))
         risks   = list(set(risks))
         cves    = list(set(cves))
@@ -278,20 +344,23 @@ def process_vuln_flatmode(teamcfg, assets, vulns):
             if i > oldest:
                 oldest = i
 
-        data = """[{nr_vulns}] {hostname}: Risk: {risk} - oldest vulnerability has been seen {age} day(s) ago.
+        data = """[{nr_vulns}] {hostname} {ipv4}: Risk: {risk} - oldest vulnerability has been seen {age} day(s) ago.
 Affected by CVES: {cve}.
 Affected OS: {osname}
 Packages to upgrade: {packages}
 """.format(hostname     = assets[a].hostname,
+            ipv4        = assets[a].ipv4address,
             nr_vulns    = len(vulns[a]),
             risk        = str.join(',', risks),
             age         = oldest,
             cve         = str.join(',', cves),
-            osname      = oses[0],
+            osname      = assets[a].os,
             packages    = str.join(',', pkgs_pretty))
-        print(data)
 
-    return
+        hostnames += "{ip} {hostname}\n".format(hostname=assets[a].hostname, ip=assets[a].ipv4address)
+        textdata += data
+
+    return (textdata, hostnames, pkg_affected)
 
 def main():
     debug('Debug mode on')
@@ -308,10 +377,16 @@ def main():
         assets = get_assets(raw)
         vulns_per_asset = get_vulns_get_asset(raw)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(assets)))
-        process_vuln_flatmode(teams[team], assets, vulns_per_asset)
+        (attachment_text, attachment_hostnames, pkgs_affected) = process_vuln_flatmode(teams[team], assets, vulns_per_asset)
 
-#    import code
-#    code.interact(local=locals())
+        bug_body = "{} hosts affected by filter {}\n\n".format(len(assets), teams[team]['filter'])
+        bug_body += "({}) Packages affected:\n".format(len(pkgs_affected))
+        for i in pkgs_affected:
+            bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs_affected[i]))
+
+        bug_create(config, teams[team], "[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
+                    len(assets), team, teams[team]['filter']), bug_body, [attachment_text,
+                        attachment_hostnames])
 
 if __name__ == "__main__":
     main()
