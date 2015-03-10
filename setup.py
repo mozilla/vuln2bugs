@@ -21,7 +21,7 @@ setup(
     keywords = "bugzilla vulnerabilities",
     url = "https://github.com/gdestuynder/vuln2bugs",
     long_description=read('README.rst'),
-	requires=['Bugsy', 'pyes', 'pytz', 'dateutil', 'hjson'],
+	requires=['bugzilla', 'pyes', 'pytz', 'dateutil', 'hjson'],
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Topic :: System :: Logging",
