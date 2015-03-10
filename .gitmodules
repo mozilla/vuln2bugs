@@ -1,0 +1,3 @@
+[submodule "bugzilla"]
+	path = bugzilla
+	url = https://github.com/gdestuynder/simple_bugzilla
