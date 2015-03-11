@@ -143,7 +143,7 @@ class VulnProcessor():
             ages = list()
             patch_in = list()
             cves = list()
-            for v in vulns[a.id]:
+            for v in vulns[a.assetid]:
                 risks       += [v.impact_label.upper()]
                 proofs      += [v.proof]
                 titles      += [v.title]
@@ -201,7 +201,7 @@ class VulnProcessor():
 
     """.format(hostname     = a.hostname,
                 ipv4        = a.ipv4address,
-                nr_vulns    = len(vulns[a.id]),
+                nr_vulns    = len(vulns[a.assetid]),
                 risk        = str.join(',', risks),
                 age         = oldest,
                 cve         = self.summarize(str.join(',', cves)),
@@ -270,11 +270,10 @@ class TeamVulns():
         assets = list()
 
         for i in self.raw:
-            i.asset['id'] = i.asset.assetid
-            assets += [i.asset]
+            if not i.asset in assets:
+                assets += [i.asset]
 
         assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipv4address']))
-        assets.reverse()
 
         return assets
 
