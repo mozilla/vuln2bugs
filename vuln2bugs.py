@@ -83,127 +83,6 @@ def toUTC(suspectedDate, localTimeZone=None):
 
     return objDate
 
-def get_entries(config, team):
-    teamfilter = config['teamsetup'][team]['filter']
-    es = ES((config['mozdef']['proto'], config['mozdef']['host'], config['mozdef']['port']))
-
-    # Default filter - time period
-    try:
-        td = config['es'][teamfilter]['_time_period']
-    except KeyError:
-        debug('No _time_period defined, defaulting to 24h')
-        td = 24
-    begindateUTC = toUTC(datetime.now() - timedelta(hours=td))
-    enddateUTC= toUTC(datetime.now())
-    fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
-    # Default filter - operator
-    try:
-        operator = config['teamsetup'][team]['operator']
-    except KeyError:
-        debug('No operator defined, defaulting to any')
-        operator = None
-
-    # Load team queries from our json config.
-    # Lists are "should" unless an item is negated with "!" then it's must_not
-    # Single items are "must"
-    query = pyes.query.BoolQuery()
-    query.add_must(pyes.MatchQuery('asset.autogroup', team))
-    if operator != None:
-        query.add_should(pyes.MatchQuery('asset.operator', operator))
-    query.add_should(pyes.MatchQuery('asset.operator', 'unknown'))
-    for item in config['es'][teamfilter]:
-        # items starting with '_' are internal/reserved, like _time_period
-        if (item.startswith('_')):
-            continue
-        val = config['es'][teamfilter][item]
-        if (type(val) == str):
-            if (val.startswith("!")):
-                query.add_must_not(pyes.MatchQuery(item, val))
-            else:
-                query.add_must(pyes.MatchQuery(item, val))
-        elif (type(val) == list):
-            for v in val:
-                if (v.startswith("!")):
-                    query.add_must_not(pyes.MatchQuery(item, v[1:]))
-                else:
-                    query.add_should(pyes.MatchQuery(item, v))
-
-    q = pyes.ConstantScoreQuery(query)
-    q = pyes.FilteredQuery(q, pyes.BoolFilter(must=[fDate]))
-
-    results = es.search(query=q, indices=config['es']['index'])
-
-    raw = results._search_raw(0, results.count())
-    # This doesn't do much, but pyes has no "close()" or similar functionality.
-    es.force_bulk()
-
-    if (raw._shards.failed != 0):
-        raise Exception("Some shards failed! {0}".format(raw._shards.__str__()))
-
-    # Nobody cares for the metadata past this point (all the goodies are in '_source')
-    data = []
-    for i in raw.hits.hits:
-        data += [i._source]
-    return data
-
-def get_assets(vulns):
-    '''Returns unique list of assets from a vuln list'''
-    # For sorting until we get priorities, we use a list instead of a dict
-    # Then deal with the inconveniences ;)
-    assets = list()
-
-    for i in vulns:
-        i.asset['id'] = i.asset.assetid
-        assets += [i.asset]
-
-    assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipv4address']))
-    assets.reverse()
-
-    return assets
-
-def get_groups(vulns):
-    '''Returns unique list of groups/teams from a vuln list'''
-    groups = list()
-    for i in vulns:
-        groups += [i.asset.autogroup]
-
-    return list(set(groups))
-
-def get_vulns_get_asset(raw):
-    '''Returns a dict-struct like this:
-    vulns_per_asset[assetid] = [vuln, vuln, ...]
-    '''
-    vulns_per_asset = dict()
-
-    for i in raw:
-        try:
-            vulns_per_asset[i.asset.assetid] += [i.vuln]
-        except KeyError:
-            vulns_per_asset[i.asset.assetid] = [i.vuln]
-
-    return vulns_per_asset
-
-def get_team_assets_with_vulns(raw, vulns_per_asset, assets):
-    '''Returns a dict-struct like this:
-    team_assets_with_vulns['opsec'] = [1223, 234. ...] (these are asset ids)
-    Not necessary if your raw result set is already filtered on the team.
-
-    If you use this, you probably also will want this:
-    # Unroll previous findings and fill in vulns_per_team which is arguably our master table
-    # vulns_per_team['opsec'][{asset: <asset-data>, 'vulns': <vulns-for-that-asset>}, ...]
-    #
-    # vulns_per_team = dict()
-    #
-    #    for team in teams:
-    #        vulns_per_team[team] = list()
-    #        for asset in team_assets_with_vulns[team]:
-    #            vulns_per_team[team] += [(assets[asset], vulns_per_asset[asset])]
-    '''
-    team_assets_with_vulns = dict()
-    team_assets_with_vulns[team] = [x for x in vulns_per_asset if assets[x].autogroup == team]
-
-    return team_assets_with_vulns
-
 def bug_create(config, teamcfg, title, body, attachments):
     '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup' '''
     url = config['bugzilla']['host']
@@ -220,134 +99,274 @@ def bug_create(config, teamcfg, title, body, attachments):
     bug.whiteboard = 'autoentry v2b-autoclose=yes v2b-autoremind=yes'
     bug = b.post_bug(bug)
 
-    a = bugzilla.DotDict()
-    a.file_name = 'short_version.csv'
-    a.summary = 'CSV list of affected ip,hostnames,packages'
-    a.data = attachments[1]
-    b.post_attachment(bug.id, a)
-
-    a.file_name = 'long_version.txt'
-    a.summary = 'Details including CVEs, OS, etc. per hostname'
-    a.data = attachments[0]
-    b.post_attachment(bug.id, a)
+    for i in attachments:
+        b.post_attachment(bug.id, i)
 
     debug('Created bug {}/{}'.format(url, bug.id))
 
-def parse_proof(proof):
-    '''Finds a package name, os, etc. in a proof-style string, such as:
-    Vulnerable OS: Red Hat Enterprise Linux 5.5 * krb5-libs - version 1.6.1-55.el5_6.1 is installed
+class VulnProcessor():
+    '''The VulnProcessor takes a teamvuln object and extra prettyfi-ed data as strings, lists, etc'''
+    def __init__(self, config, teamvulns):
+        self.teamvulns = teamvulns
+        self.config = config
+        a, b, c = self.process_vuln_flatmode(config, teamvulns.assets, teamvulns.vulnerabilities_per_asset)
+        self.full_text_output = a
+        self.short_csv = b
+        self.affected_packages_list = c
 
-    Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
-    or None if parsing failed.
-    '''
+    def summarize(self, data, dlen=64):
+        '''summarize any string longer than dlen to dlen+ (truncated)'''
+        if len(data) > dlen:
+            return data[:dlen]+' (truncated)'
+        return data
 
-    osname = ''
-    pkg = ''
-    version = ''
+    def get_full_text_output(self):
+        return self.full_text_output
 
-    try:
-        tmp = proof.split('Vulnerable OS: ')[1]
-        tmp = tmp.split('*')
-        osname = tmp[0].strip()
-        tmp = tmp[1].split('-')
-        pkg = tmp[0].lstrip().strip()
-        tmp = str.join('', tmp[1:]).split('version ')[1]
-        version = tmp.split(' is installed')[0]
-    except IndexError:
-        return None
+    def get_short_csv(self):
+        return self.short_csv
 
-    return {'pkg': pkg, 'os': osname, 'version': version}
+    def get_affected_packages_list(self):
+        return self.affected_packages_list
 
+    def process_vuln_flatmode(self, teamcfg, assets, vulns):
+        '''Preparser that could use some refactoring.'''
+        textdata = ''
+        short_list = ''
+        pkg_affected = dict()
 
-def summarize(data, dlen=64):
-    '''summarize any string longer than dlen to dlen+ (truncated)'''
-    if len(data) > dlen:
-        return data[:dlen]+' (truncated)'
-    return data
+        # Unroll all vulns
+        for a in assets:
+            risks = list()
+            proofs = list()
+            titles = list()
+            ages = list()
+            patch_in = list()
+            cves = list()
+            for v in vulns[a.id]:
+                risks       += [v.impact_label.upper()]
+                proofs      += [v.proof]
+                titles      += [v.title]
+                ages        += [v.age_days]
+                cves        += v.cves
+                patch_in    += [v.patch_in]
 
-def process_vuln_flatmode(teamcfg, assets, vulns):
-    '''Outputs a short, flat-ish text list of vulnerabilities per asset/system for use in attachments, text body, etc.'''
-    textdata = ''
-    short_list = ''
-    pkg_affected = dict()
+            #pkg_vuln = Counter(proofs).most_common()
+            pkgs = list()
+            pkg_parsed = True
+            pkg_ver = dict()
+            for i in proofs:
+                p = self.parse_proof(i)
+                pname = p['pkg']
+                pver = p['version']
+                if p == None:
+                    pkg_parsed = False
+                    pkgs += [i]
+                    pkg_affected[i] = 'Unknown'
+                else:
+                    pkg_ver[pname] = pver
+                    pkgs += [pname]
+                    try:
+                        pkg_affected[pname] += [pver]
+                        pkg_affected[pname] = list(set(pkg_affected[pname]))
+                    except KeyError:
+                        pkg_affected[pname] = [pver]
 
-    # Unroll all vulns
-    for a in assets:
-        risks = list()
-        proofs = list()
-        titles = list()
-        ages = list()
-        patch_in = list()
-        cves = list()
-        for v in vulns[a.id]:
-            risks       += [v.impact_label.upper()]
-            proofs      += [v.proof]
-            titles      += [v.title]
-            ages        += [v.age_days]
-            cves        += v.cves
-            patch_in    += [v.patch_in]
+            # Uniquify
+            pkgs    = list(set(pkgs))
+            risks   = list(set(risks))
+            cves    = list(set(cves))
 
-        #pkg_vuln = Counter(proofs).most_common()
-        pkgs = list()
-        pkg_parsed = True
-        pkg_ver = dict()
-        for i in proofs:
-            p = parse_proof(i)
-            pname = p['pkg']
-            pver = p['version']
-            if p == None:
-                pkg_parsed = False
-                pkgs += [i]
-                pkg_affected[i] = 'Unknown'
+            if pkg_parsed:
+                pkgs_pretty = list()
+                for i in pkgs:
+                    pkgs_pretty += ['{} (affected version {})'.format(i, self.summarize(pkg_ver[i]))]
             else:
-                pkg_ver[pname] = pver
-                pkgs += [pname]
-                try:
-                    pkg_affected[pname] += [pver]
-                    pkg_affected[pname] = list(set(pkg_affected[pname]))
-                except KeyError:
-                    pkg_affected[pname] = [pver]
+                pkgs_pretty = pkgs
 
-        # Uniquify
-        pkgs    = list(set(pkgs))
-        risks   = list(set(risks))
-        cves    = list(set(cves))
+            # What's the oldest vuln found?
+            oldest = 0
 
-        if pkg_parsed:
-            pkgs_pretty = list()
-            for i in pkgs:
-                pkgs_pretty += ['{} (affected version {})'.format(i, summarize(pkg_ver[i]))]
-        else:
-            pkgs_pretty = pkgs
+            for i in ages:
+                if i > oldest:
+                    oldest = i
 
-        # What's the oldest vuln found?
-        oldest = 0
+            data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
-        for i in ages:
-            if i > oldest:
-                oldest = i
+    Risk: {risk} - oldest vulnerability has been seen {age} day(s) ago.
+    CVES: {cve}.
+    OS: {osname}
+    Packages to upgrade: {packages}
+    -------------------------------------------------------------------------------------
 
-        data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
+    """.format(hostname     = a.hostname,
+                ipv4        = a.ipv4address,
+                nr_vulns    = len(vulns[a.id]),
+                risk        = str.join(',', risks),
+                age         = oldest,
+                cve         = self.summarize(str.join(',', cves)),
+                osname      = a.os,
+                packages    = str.join(',', pkgs_pretty))
 
-Risk: {risk} - oldest vulnerability has been seen {age} day(s) ago.
-CVES: {cve}.
-OS: {osname}
-Packages to upgrade: {packages}
--------------------------------------------------------------------------------------
+            short_list += "{hostname},{ip},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
+            textdata += data
 
-""".format(hostname     = a.hostname,
-            ipv4        = a.ipv4address,
-            nr_vulns    = len(vulns[a.id]),
-            risk        = str.join(',', risks),
-            age         = oldest,
-            cve         = summarize(str.join(',', cves)),
-            osname      = a.os,
-            packages    = str.join(',', pkgs_pretty))
+        return (textdata, short_list, pkg_affected)
 
-        short_list += "{ip},{hostname},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
-        textdata += data
+    def parse_proof(self, proof):
+        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
+        Vulnerable OS: Red Hat Enterprise Linux 5.5 * krb5-libs - version 1.6.1-55.el5_6.1 is installed
 
-    return (textdata, short_list, pkg_affected)
+        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
+        or None if parsing failed.
+        '''
+        osname = ''
+        pkg = ''
+        version = ''
+
+        try:
+            tmp = proof.split('Vulnerable OS: ')[1]
+            tmp = tmp.split('*')
+            osname = tmp[0].strip()
+            tmp = tmp[1].split('-')
+            pkg = tmp[0].lstrip().strip()
+            tmp = str.join('', tmp[1:]).split('version ')[1]
+            version = tmp.split(' is installed')[0]
+        except IndexError:
+            return None
+
+        return {'pkg': pkg, 'os': osname, 'version': version}
+
+class TeamVulns():
+    '''TeamVulns extract the vulnerability data from MozDef and sorts it into clear structures'''
+    def __init__(self, config, team):
+        self.team = team
+        self.config = config
+        # Get all entries/data from ES/MozDef
+        self.raw = self.get_entries()
+        # Sort out assets
+        self.assets = self.get_assets()
+        # Sort out vulnerabilities
+        self.vulnerabilities_per_asset = self.get_vulns_per_asset()
+
+    def get_vulns_per_asset(self):
+        '''Returns a dict-struct like this:
+        vulns_per_asset[assetid] = [vuln, vuln, ...]
+        '''
+        vulns_per_asset = dict()
+
+        for i in self.raw:
+            try:
+                vulns_per_asset[i.asset.assetid] += [i.vuln]
+            except KeyError:
+                vulns_per_asset[i.asset.assetid] = [i.vuln]
+
+        return vulns_per_asset
+
+    def get_assets(self):
+        '''Returns unique list of assets from a vuln list'''
+        # For sorting until we get priorities, we use a list instead of a dict
+        # Then deal with the inconveniences ;)
+        assets = list()
+
+        for i in self.raw:
+            i.asset['id'] = i.asset.assetid
+            assets += [i.asset]
+
+        assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipv4address']))
+        assets.reverse()
+
+        return assets
+
+    def get_entries(self):
+        '''Get all entries for a team + their filter from ES/MozDef'''
+        teamfilter = self.config['teamsetup'][self.team]['filter']
+        es = ES((self.config['mozdef']['proto'], self.config['mozdef']['host'], self.config['mozdef']['port']))
+
+        # Default filter - time period
+        try:
+            td = self.config['es'][teamfilter]['_time_period']
+        except KeyError:
+            debug('No _time_period defined, defaulting to 24h')
+            td = 24
+        begindateUTC = toUTC(datetime.now() - timedelta(hours=td))
+        enddateUTC= toUTC(datetime.now())
+        fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
+        # Default filter - operator
+        try:
+            operator = self.config['teamsetup'][self.team]['operator']
+        except KeyError:
+            debug('No operator defined, defaulting to any')
+            operator = None
+
+        # Load team queries from our json config.
+        # Lists are "should" unless an item is negated with "!" then it's must_not
+        # Single items are "must"
+        query = pyes.query.BoolQuery()
+        query.add_must(pyes.MatchQuery('asset.autogroup', self.team))
+        if operator != None:
+            query.add_should(pyes.MatchQuery('asset.operator', operator))
+        query.add_should(pyes.MatchQuery('asset.operator', 'unknown'))
+        for item in self.config['es'][teamfilter]:
+            # items starting with '_' are internal/reserved, like _time_period
+            if (item.startswith('_')):
+                continue
+            val = self.config['es'][teamfilter][item]
+            if (type(val) == str):
+                if (val.startswith("!")):
+                    query.add_must_not(pyes.MatchQuery(item, val))
+                else:
+                    query.add_must(pyes.MatchQuery(item, val))
+            elif (type(val) == list):
+                for v in val:
+                    if (v.startswith("!")):
+                        query.add_must_not(pyes.MatchQuery(item, v[1:]))
+                    else:
+                        query.add_should(pyes.MatchQuery(item, v))
+
+        q = pyes.ConstantScoreQuery(query)
+        q = pyes.FilteredQuery(q, pyes.BoolFilter(must=[fDate]))
+
+        results = es.search(query=q, indices=self.config['es']['index'])
+
+        raw = results._search_raw(0, results.count())
+        # This doesn't do much, but pyes has no "close()" or similar functionality.
+        es.force_bulk()
+
+        if (raw._shards.failed != 0):
+            raise Exception("Some shards failed! {0}".format(raw._shards.__str__()))
+
+        # Nobody cares for the metadata past this point (all the goodies are in '_source')
+        data = []
+        for i in raw.hits.hits:
+            data += [i._source]
+        return data
+
+
+def create_bug_type_flat(config, team, teamvulns, processor):
+    teamcfg = config['teamsetup'][team]
+
+    full_text = processor.get_full_text_output()
+    short_csv = processor.get_short_csv()
+    pkgs = processor.get_affected_packages_list()
+
+    # Attachments
+    ba = [bugzilla.DotDict(), bugzilla.DotDict()]
+    ba[0].file_name = 'short_list.csv'
+    ba[0].summary = 'CSV list of affected ip,hostname,package(s)'
+    ba[0].data = short_csv
+    ba[1].file_name = 'detailled_list.txt'
+    ba[1].summary = 'Details including CVEs, OS, etc. affected'
+    ba[1].data = full_text
+
+    bug_body = "{} hosts affected by filter {}\n\n".format(len(teamvulns.assets), teamcfg['filter'])
+    bug_body += "({}) Packages affected:\n".format(len(pkgs))
+    for i in pkgs:
+        bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
+    bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
+
+    bug_create(config, teamcfg, title="[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
+                len(teamvulns.assets), team, teamcfg['filter']), body=bug_body, attachments=ba)
 
 def main():
     debug('Debug mode on')
@@ -360,21 +379,10 @@ def main():
     # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] an mydict.hi
     for team in teams:
         debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
-        raw = get_entries(config, team)
-        assets = get_assets(raw)
-        vulns_per_asset = get_vulns_get_asset(raw)
-        debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(assets)))
-        (attachment_text, attachment_hostnames, pkgs_affected) = process_vuln_flatmode(teams[team], assets, vulns_per_asset)
-
-        bug_body = "{} hosts affected by filter {}\n\n".format(len(assets), teams[team]['filter'])
-        bug_body += "({}) Packages affected:\n".format(len(pkgs_affected))
-        for i in pkgs_affected:
-            bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs_affected[i]))
-        bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
-
-        bug_create(config, teams[team], "[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
-                    len(assets), team, teams[team]['filter']), bug_body, [attachment_text,
-                        attachment_hostnames])
+        teamvulns = TeamVulns(config, team)
+        processor = VulnProcessor(config, teamvulns)
+        debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
+        create_bug_type_flat(config, team, teamvulns, processor)
 
 if __name__ == "__main__":
     main()
