@@ -115,10 +115,11 @@ class VulnProcessor():
     def __init__(self, config, teamvulns):
         self.teamvulns = teamvulns
         self.config = config
-        a, b, c = self.process_vuln_flatmode(config, teamvulns.assets, teamvulns.vulnerabilities_per_asset)
+        a, b, c, d = self.process_vuln_flatmode(config, teamvulns.assets, teamvulns.vulnerabilities_per_asset)
         self.full_text_output = a
         self.short_csv = b
         self.affected_packages_list = c
+        self.oldest = d
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -135,11 +136,15 @@ class VulnProcessor():
     def get_affected_packages_list(self):
         return self.affected_packages_list
 
+    def get_oldest(self):
+        return self.oldest
+
     def process_vuln_flatmode(self, teamcfg, assets, vulns):
         '''Preparser that could use some refactoring.'''
         textdata = ''
         short_list = ''
         pkg_affected = dict()
+        oldest_all = 0
 
         # Unroll all vulns
         for a in assets:
@@ -190,20 +195,16 @@ class VulnProcessor():
             else:
                 pkgs_pretty = pkgs
 
-            # What's the oldest vuln found?
+            # What's the oldest vuln found in this asset?
             oldest = 0
 
             for i in ages:
                 if i > oldest:
                     oldest = i
 
-            today = toUTC(datetime.now())
-            sla = today + timedelta(days=7)
-
             data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
-Risk: {risk} - oldest vulnerability has been seen on these systems {age} day(s) ago.
-SLA: Please patch before {sla} (7 days).
+Risk: {risk} - oldest vulnerability has been seen on these systems {age} day(s) ago at the time of report generation.
 CVES: {cve}.
 OS: {osname}
 Packages to upgrade: {packages}
@@ -217,13 +218,14 @@ Packages to upgrade: {packages}
                 cve         = self.summarize(str.join(',', cves)),
                 osname      = a.os,
                 packages    = str.join(',', pkgs_pretty),
-                sla         = sla.strftime('%Y-%m%d')
                 )
 
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
             textdata += data
+            if oldest > oldest_all:
+                oldest_all = oldest
 
-        return (textdata, short_list, pkg_affected)
+        return (textdata, short_list, pkg_affected, oldest)
 
     def parse_proof(self, proof):
         '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
@@ -360,6 +362,7 @@ def bug_type_flat(config, team, teamvulns, processor):
     full_text = processor.get_full_text_output()
     short_csv = processor.get_short_csv()
     pkgs = processor.get_affected_packages_list()
+    oldest = processor.get_oldest()
     vulns_len = len(teamvulns.assets)
 
     # Attachments
@@ -371,7 +374,12 @@ def bug_type_flat(config, team, teamvulns, processor):
     ba[1].summary = 'Details including CVEs, OS, etc. affected'
     ba[1].data = full_text
 
-    bug_body = "{} hosts affected by filter {}\n\n".format(vulns_len, teamcfg['filter'])
+    today = toUTC(datetime.now())
+    sla = today + timedelta(days=7)
+
+    bug_body = "{} hosts affected by filter {}\n".format(vulns_len, teamcfg['filter'])
+    bug_body += "At time of report, the oldest vulnerability is {age} day(s) old.\n".format(age=oldest)
+    bug_body += "Expected time to patch: 7 days, before {sla}.\n\n".format(sla=sla.strftime('%Y-%m-%d'))
     bug_body += "({}) Packages affected:\n".format(len(pkgs))
     for i in pkgs:
         bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
