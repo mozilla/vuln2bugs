@@ -40,14 +40,14 @@ Usage
 
 When vuln2bugs runs, it will:
 
-- Check for the current vulnerabilities found per asset and per team (autogroup in MozDef).
-- Check no prior bug exists, if none do, create a new bug to the configured team.
-  - Attach a list of vulnerable hosts (currently 2 attachments: CSV and "detailed")
-  - Indicate the due date and set some whiteboard tags
-- If a bug exits, check if it needs updating.
-  - Update attachments if more or less vulnerabilities have been found since last run.
-  - Remind on the bug if it's paste due date (SLA) and set a NEEDINFO flag.
-  - Close the bug if all vulnerabilities have been fixed.
+1. Check for the current vulnerabilities found per asset and per team (autogroup in MozDef).
+2. Check no prior bug exists, if none do, create a new bug to the configured team.
+  a. Attach a list of vulnerable hosts (currently 2 attachments: CSV and "detailed")
+  b. Indicate the due date and set some whiteboard tags
+3. If a bug exits, check if it needs updating.
+  a. Update attachments if more or less vulnerabilities have been found since last run.
+  b. Remind on the bug if it's paste due date (SLA) and set a NEEDINFO flag.
+  c. Close the bug if all vulnerabilities have been fixed.
 
 Vuln2bugs is expected to run after each vmintgr run (see https://github.com/ameihm0912/vmintgr/).
 
