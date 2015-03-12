@@ -52,6 +52,8 @@ from datetime import timedelta
 import hjson as json
 from io import StringIO
 from collections import Counter
+import hashlib
+import base64
 import socket
 
 from bugzilla import *
@@ -96,7 +98,11 @@ def bug_create(config, teamcfg, title, body, attachments):
     bug.summary = title
     bug.groups = teamcfg['groups']
     bug.description = body
-    bug.whiteboard = 'autoentry v2b-autoclose=yes v2b-autoremind=yes'
+    today = toUTC(datetime.now())
+    sla = today + timedelta(days=7)
+    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={}'.format(sla.strftime('%Y-%m-%d'))
+    bug.priority = teamcfg['priority']
+    bug.severity = teamcfg['severity']
     bug = b.post_bug(bug)
 
     for i in attachments:
@@ -173,9 +179,9 @@ class VulnProcessor():
                         pkg_affected[pname] = [pver]
 
             # Uniquify
-            pkgs    = list(set(pkgs))
-            risks   = list(set(risks))
-            cves    = list(set(cves))
+            pkgs    = sorted(set(pkgs))
+            risks   = sorted(set(risks))
+            cves    = sorted(set(cves))
 
             if pkg_parsed:
                 pkgs_pretty = list()
@@ -191,22 +197,28 @@ class VulnProcessor():
                 if i > oldest:
                     oldest = i
 
+            today = toUTC(datetime.now())
+            sla = today + timedelta(days=7)
+
             data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
-    Risk: {risk} - oldest vulnerability has been seen {age} day(s) ago.
-    CVES: {cve}.
-    OS: {osname}
-    Packages to upgrade: {packages}
-    -------------------------------------------------------------------------------------
+Risk: {risk} - oldest vulnerability has been seen on these systems {age} day(s) ago.
+SLA: Please patch before {sla} (7 days).
+CVES: {cve}.
+OS: {osname}
+Packages to upgrade: {packages}
+-------------------------------------------------------------------------------------
 
-    """.format(hostname     = a.hostname,
+""".format(hostname     = a.hostname,
                 ipv4        = a.ipv4address,
                 nr_vulns    = len(vulns[a.assetid]),
                 risk        = str.join(',', risks),
                 age         = oldest,
                 cve         = self.summarize(str.join(',', cves)),
                 osname      = a.os,
-                packages    = str.join(',', pkgs_pretty))
+                packages    = str.join(',', pkgs_pretty),
+                sla         = sla.strftime('%Y-%m%d')
+                )
 
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
             textdata += data
@@ -342,12 +354,13 @@ class TeamVulns():
         return data
 
 
-def create_bug_type_flat(config, team, teamvulns, processor):
+def bug_type_flat(config, team, teamvulns, processor):
     teamcfg = config['teamsetup'][team]
 
     full_text = processor.get_full_text_output()
     short_csv = processor.get_short_csv()
     pkgs = processor.get_affected_packages_list()
+    vulns_len = len(teamvulns.assets)
 
     # Attachments
     ba = [bugzilla.DotDict(), bugzilla.DotDict()]
@@ -358,14 +371,123 @@ def create_bug_type_flat(config, team, teamvulns, processor):
     ba[1].summary = 'Details including CVEs, OS, etc. affected'
     ba[1].data = full_text
 
-    bug_body = "{} hosts affected by filter {}\n\n".format(len(teamvulns.assets), teamcfg['filter'])
+    bug_body = "{} hosts affected by filter {}\n\n".format(vulns_len, teamcfg['filter'])
     bug_body += "({}) Packages affected:\n".format(len(pkgs))
     for i in pkgs:
         bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
     bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
 
-    bug_create(config, teamcfg, title="[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
-                len(teamvulns.assets), team, teamcfg['filter']), body=bug_body, attachments=ba)
+    # Only make a new bug if no old one exists
+    bug_title = "[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
+                vulns_len, team, teamcfg['filter'])
+    bug = find_latest_open_bug(config, team)
+    if ((bug == None) and (vulns_len > 0)):
+        bug_create(config, teamcfg, bug_title, bug_body, ba)
+    else:
+        #No more vulnerablities? Woot! Close the bug!
+        if (vulns_len == 0):
+            close = True
+        else:
+            close = False
+        update_bug(config, teamcfg, bug_title, bug_body, ba, bug, close)
+
+def find_latest_open_bug(config, team):
+    url = config['bugzilla']['host']
+    b = bugzilla.Bugzilla(url=url+'/rest/', api_key=config['bugzilla']['api_key'])
+    teamcfg = config['teamsetup'][team]
+
+    terms = [{'product': teamcfg['product']}, {'component': teamcfg['component']},
+            {'creator': config['bugzilla']['creator']}, {'whiteboard': 'autoentry'}, {'resolution': ''},
+            {'status': 'NEW'}, {'status': 'ASSIGNED'}, {'status': 'REOPENED'}, {'status': 'UNCONFIRMED'}]
+    bugs = b.search_bugs(terms)['bugs']
+    #Newest only
+    try:
+        return bugzilla.DotDict(bugs[-1])
+    except IndexError:
+        return None
+
+def khash(data):
+    '''Single place to change hashes'''
+    return hashlib.sha256(data.encode('ascii')).hexdigest()
+
+def update_bug(config, teamcfg, title, body, attachments, bug, close):
+    '''This will update any open bug with correct attributes.
+    This check attachments instead of a control hash since it's needed for attachment obsolescence.. its also neat
+    anyway.'''
+    #Safety stuff - never edit bugs that aren't ours
+    #These asserts should normally never trigger
+    assert bug.creator == config['bugzilla']['creator']
+    assert bug.whiteboard.startswith('autoentry')
+
+    any_update = False
+
+    url = config['bugzilla']['host']
+    b = bugzilla.Bugzilla(url=url+'/rest/', api_key=config['bugzilla']['api_key'])
+    debug('Checking for updates on {}/{}'.format(url, bug.id))
+
+    #Check if we have to close this bug first (i.e. job's done, hurrai!)
+    if (bug.whiteboard.find('v2b-autoclose') != -1):
+        if (close):
+            bug_update = bugzilla.DotDict()
+            bug_update.resolution = 'fixed'
+            bug_update.status = 'resolved'
+            b.put_bug(bug.id, bug_update)
+            return
+
+    try:
+        h = bug.whiteboard.split('v2b-duedate=')[1]
+        due = h.split(' ')[0]
+        debug('Bug completion is due by {}'.format(due))
+    except IndexError:
+        due = toUTC(datetime.now())
+        debug('No due date found in whiteboard tag, hmm, maybe someone removed it')
+
+    new_hashes = {}
+    for a in attachments:
+        new_hashes[khash(a.data)] = a
+
+
+    old_hashes = {}
+    for a in b.get_attachments(bug.id)[str(bug.id)]:
+        a = bugzilla.DotDict(a)
+        if a.is_obsolete: continue
+        a.data = base64.standard_b64decode(a.data).decode('ascii', 'ignore')
+        old_hashes[khash(a.data)] = a
+
+    for h in new_hashes:
+        if (h in old_hashes): continue
+        a = new_hashes[h]
+        for i in old_hashes:
+            old_a = old_hashes[i]
+            if (old_a.file_name == a.file_name):
+                # setting obsolete attachments during the new attachment post does not actually work in the API
+                # So we update the old attachment to set it obsolete meanwhile
+                a.obsoletes = [old_a.id]
+                tmp = bugzilla.DotDict()
+                tmp.is_obsolete = True
+                tmp.file_name = old_a.file_name
+                b.put_attachment(old_a.id, tmp)
+        b.post_attachment(bug.id, a)
+        any_update = True
+
+    if (any_update):
+        # Need to update title, bump bug, etc.
+        bug_update = bugzilla.DotDict()
+        bug_update.summary = title
+        bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
+        b.put_bug(bug.id, bug_update)
+        b.post_comment(bug.id, 'New/different hostnames have been found since the last run. The files have been updated.')
+        debug('Updated bug {}/{}'.format(url, bug.id))
+    #Do we need to autoremind?
+    elif (bug.whiteboard.find('v2b-autoremind') != -1):
+        today = toUTC(datetime.now())
+        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
+        if (due_dt < today):
+            bug_update = bugzilla.DotDict()
+            bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
+            b.put_bug(bug.id, bug_update)
+            b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}), setting needinfo flag!'.format(
+                    due=due, today=today.strftime('%Y-%m-%d')))
 
 def main():
     debug('Debug mode on')
@@ -381,7 +503,7 @@ def main():
         teamvulns = TeamVulns(config, team)
         processor = VulnProcessor(config, teamvulns)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
-        create_bug_type_flat(config, team, teamvulns, processor)
+        bug_type_flat(config, team, teamvulns, processor)
 
 if __name__ == "__main__":
     main()
