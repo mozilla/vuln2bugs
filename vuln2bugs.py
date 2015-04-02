@@ -69,6 +69,7 @@ def toUTC(suspectedDate, localTimeZone=None):
     if (localTimeZone == None):
         try:
             localTimeZone = '/'.join(os.path.realpath('/etc/localtime').split('/')[-2:])
+            localTimeZone = localTimeZone.split('/')[-1]
         except:
             #Meh if all fails, I decide you're UTC!
             localTimeZone = 'UTC'
