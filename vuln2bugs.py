@@ -67,7 +67,11 @@ def debug(msg):
 def toUTC(suspectedDate, localTimeZone=None):
     '''Anything => UTC date. Magic.'''
     if (localTimeZone == None):
-        localTimeZone = '/'.join(os.path.realpath('/etc/localtime').split('/')[-2:])
+        try:
+            localTimeZone = '/'.join(os.path.realpath('/etc/localtime').split('/')[-2:])
+        except:
+            #Meh if all fails, I decide you're UTC!
+            localTimeZone = 'UTC'
     utc = pytz.UTC
     objDate = None
     if (type(suspectedDate) == str):
