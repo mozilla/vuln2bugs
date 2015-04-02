@@ -1,5 +1,5 @@
 bugzilla
 pyes
-dateutil
+python-dateutil
 pytz
 hjson
