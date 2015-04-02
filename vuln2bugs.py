@@ -251,8 +251,8 @@ Packages to upgrade: {packages}
             pkg = tmp[0].lstrip().strip()
             tmp = str.join('', tmp[1:]).split('version ')[1]
             version = tmp.split(' is installed')[0]
-        except IndexError:
-            return None
+        except:
+            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
 
         return {'pkg': pkg, 'os': osname, 'version': version}
 
