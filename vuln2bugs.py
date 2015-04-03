@@ -332,17 +332,18 @@ class TeamVulns():
             if (item.startswith('_')):
                 continue
             val = self.config['es'][teamfilter][item]
-            if (type(val) == str):
-                if (val.startswith("!")):
-                    query.add_must_not(pyes.MatchQuery(item, val))
-                else:
-                    query.add_must(pyes.MatchQuery(item, val))
-            elif (type(val) == list):
+            if (type(val) == list):
                 for v in val:
                     if (v.startswith("!")):
                         query.add_must_not(pyes.MatchQuery(item, v[1:]))
                     else:
                         query.add_should(pyes.MatchQuery(item, v))
+            else:
+                if (val.startswith("!")):
+                    query.add_must_not(pyes.MatchQuery(item, val))
+                else:
+                    query.add_must(pyes.MatchQuery(item, val))
+
 
         q = pyes.ConstantScoreQuery(query)
         q = pyes.FilteredQuery(q, pyes.BoolFilter(must=[fDate]))
