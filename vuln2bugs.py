@@ -69,9 +69,7 @@ def toUTC(suspectedDate, localTimeZone=None):
     if (localTimeZone == None):
         try:
             localTimeZone = '/'.join(os.path.realpath('/etc/localtime').split('/')[-2:])
-            localTimeZone = localTimeZone.split('/')[-1]
         except:
-            #Meh if all fails, I decide you're UTC!
             localTimeZone = 'UTC'
     utc = pytz.UTC
     objDate = None
@@ -81,7 +79,11 @@ def toUTC(suspectedDate, localTimeZone=None):
         objDate=suspectedDate
 
     if (objDate.tzinfo is None):
-        objDate=pytz.timezone(localTimeZone).localize(objDate)
+        try:
+            objDate=pytz.timezone(localTimeZone).localize(objDate)
+        except pytz.exceptions.UnknownTimeZoneError:
+            #Meh if all fails, I decide you're UTC!
+            objDate=pytz.timezone('UTC').localize(objDate)
         objDate=utc.normalize(objDate)
     else:
         objDate=utc.normalize(objDate)
