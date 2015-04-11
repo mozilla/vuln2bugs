@@ -498,8 +498,8 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         #Needinfo may fail if the user is set to deny them.
         try:
             b.put_bug(bug.id, bug_update)
-        except e:
-            debug(str(e))
+        except Exception as e:
+            debug("Exception occured while setting NEEDINFO: {}".format(str(e)))
 
         b.post_comment(bug.id, 'New/different hostnames have been found since the last run. The files have been updated.')
         debug('Updated bug {}/{}'.format(url, bug.id))
@@ -513,8 +513,8 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
             #Needinfo may fail if the user is set to deny them.
             try:
                 b.put_bug(bug.id, bug_update)
-            except e:
-                debug(str(e))
+            except Exception as e:
+                debug("Exception occured while setting NEEDINFO: {}".format(str(e)))
 
             bug_update = bugzilla.DotDict()
             b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}).'.format(
