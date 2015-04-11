@@ -488,10 +488,19 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
 
     if (any_update):
         # Need to update title, bump bug, etc.
+        # Do updates one by one as some may fail.
         bug_update = bugzilla.DotDict()
         bug_update.summary = title
-        bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
         b.put_bug(bug.id, bug_update)
+
+        bug_update = bugzilla.DotDict()
+        bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
+        #Needinfo may fail if the user is set to deny them.
+        try:
+            b.put_bug(bug.id, bug_update)
+        except e:
+            debug(str(e))
+
         b.post_comment(bug.id, 'New/different hostnames have been found since the last run. The files have been updated.')
         debug('Updated bug {}/{}'.format(url, bug.id))
     #Do we need to autoremind?
@@ -501,9 +510,16 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         if (due_dt < today):
             bug_update = bugzilla.DotDict()
             bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
-            b.put_bug(bug.id, bug_update)
-            b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}), setting needinfo flag!'.format(
+            #Needinfo may fail if the user is set to deny them.
+            try:
+                b.put_bug(bug.id, bug_update)
+            except e:
+                debug(str(e))
+
+            bug_update = bugzilla.DotDict()
+            b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}).'.format(
                     due=due, today=today.strftime('%Y-%m-%d')))
+            b.put_bug(bug.id, bug_update)
 
 def main():
     debug('Debug mode on')
