@@ -426,6 +426,25 @@ def khash(data):
     '''Single place to change hashes'''
     return hashlib.sha256(data.encode('ascii')).hexdigest()
 
+def set_needinfo(b, bug, user):
+    '''Check if needinfo is set for the user, and set it if not set.
+    Returns True only when needinfo is actually being set by this function.'''
+    for f in bug.flags:
+        if (f['requestee'] == user) and (f['setter'] == bug.creator) and (f['name'] == 'needinfo'):
+            debug("Bug {} already has need info set for {}".format(bug.id, user))
+            return False
+
+    bug_update = bugzilla.DotDict()
+    bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': user}]
+    #Needinfo may fail if the user is set to deny them.
+    try:
+        b.put_bug(bug.id, bug_update)
+        return True
+    except Exception as e:
+        debug("Exception occured while setting NEEDINFO: {}".format(str(e)))
+        return False
+
+
 def update_bug(config, teamcfg, title, body, attachments, bug, close):
     '''This will update any open bug with correct attributes.
     This check attachments instead of a control hash since it's needed for attachment obsolescence.. its also neat
@@ -493,14 +512,6 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         bug_update.summary = title
         b.put_bug(bug.id, bug_update)
 
-        bug_update = bugzilla.DotDict()
-        bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
-        #Needinfo may fail if the user is set to deny them.
-        try:
-            b.put_bug(bug.id, bug_update)
-        except Exception as e:
-            debug("Exception occured while setting NEEDINFO: {}".format(str(e)))
-
         b.post_comment(bug.id, 'New/different hostnames have been found since the last run. The files have been updated.')
         debug('Updated bug {}/{}'.format(url, bug.id))
     #Do we need to autoremind?
@@ -508,18 +519,11 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         today = toUTC(datetime.now())
         due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
         if (due_dt < today):
-            bug_update = bugzilla.DotDict()
-            bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': bug.assigned_to}]
-            #Needinfo may fail if the user is set to deny them.
-            try:
+            if (set_needinfo(b, bug, bug.assigned_to)):
+                bug_update = bugzilla.DotDict()
+                b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}).'.format(
+                        due=due, today=today.strftime('%Y-%m-%d')))
                 b.put_bug(bug.id, bug_update)
-            except Exception as e:
-                debug("Exception occured while setting NEEDINFO: {}".format(str(e)))
-
-            bug_update = bugzilla.DotDict()
-            b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}).'.format(
-                    due=due, today=today.strftime('%Y-%m-%d')))
-            b.put_bug(bug.id, bug_update)
 
 def main():
     debug('Debug mode on')
