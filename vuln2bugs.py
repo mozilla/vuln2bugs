@@ -506,14 +506,13 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         any_update = True
 
     if (any_update):
-        # Need to update title, bump bug, etc.
-        # Do updates one by one as some may fail.
+        #Summary/title update
         bug_update = bugzilla.DotDict()
         bug_update.summary = title
         b.put_bug(bug.id, bug_update)
 
-        b.post_comment(bug.id, 'New/different hostnames have been found since the last run. The files have been updated.')
         debug('Updated bug {}/{}'.format(url, bug.id))
+
     #Do we need to autoremind?
     elif (bug.whiteboard.find('v2b-autoremind') != -1):
         today = toUTC(datetime.now())
