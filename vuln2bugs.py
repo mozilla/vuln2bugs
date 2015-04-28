@@ -423,8 +423,23 @@ def find_latest_open_bug(config, team):
         return None
 
 def khash(data):
-    '''Single place to change hashes'''
-    return hashlib.sha256(data.encode('ascii')).hexdigest()
+    '''Single place to change hashes of attachments'''
+    newdata = data
+    #TODO to improve this cruft we need to store all attachment data in real structures.
+    must_start_with = None
+    if (data.find('Packages to upgrade') != -1):
+        must_start_with = 'Packages to upgrade'
+
+    if must_start_with != None:
+        #Remove generic data that we don't care for while comparing like dates so these don't get checksummed.
+        #So we just get Packages:
+        datalist = newdata.split('\n')
+        newdata = ''
+        for i in datalist:
+            if i.startswith(must_start_with):
+                newdata += i+"\n"
+
+    return hashlib.sha256(newdata.encode('ascii')).hexdigest()
 
 def set_needinfo(b, bug, user):
     '''Check if needinfo is set for the user, and set it if not set.
@@ -480,7 +495,6 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
     new_hashes = {}
     for a in attachments:
         new_hashes[khash(a.data)] = a
-
 
     old_hashes = {}
     for a in b.get_attachments(bug.id)[str(bug.id)]:
