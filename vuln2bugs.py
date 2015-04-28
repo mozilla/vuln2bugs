@@ -249,7 +249,8 @@ Packages to upgrade: {packages}
             tmp = proof.split('Vulnerable OS: ')[1]
             tmp = tmp.split('*')
             osname = tmp[0].strip()
-            tmp = tmp[1].split('-')
+            # spaces matter in the split - as package names never contain spaces, but may contain dashes
+            tmp = tmp[1].split(' - ')
             pkg = tmp[0].lstrip().strip()
             tmp = str.join('', tmp[1:]).split('version ')[1]
             version = tmp.split(' is installed')[0]
