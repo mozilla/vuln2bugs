@@ -446,9 +446,13 @@ def set_needinfo(b, bug, user):
     '''Check if needinfo is set for the user, and set it if not set.
     Returns True only when needinfo is actually being set by this function.'''
     for f in bug.flags:
-        if (f['requestee'] == user) and (f['setter'] == bug.creator) and (f['name'] == 'needinfo'):
-            debug("Bug {} already has need info set for {}".format(bug.id, user))
-            return False
+        try:
+            if (f['requestee'] == user) and (f['setter'] == bug.creator) and (f['name'] == 'needinfo'):
+                debug("Bug {} already has need info set for {}".format(bug.id, user))
+                return False
+        #Some flags don't have these fields, we skip 'em
+        except KeyError:
+            continue
 
     bug_update = bugzilla.DotDict()
     bug_update.flags = [{'type_id': 800, 'name': 'needinfo', 'status': '?', 'new': True, 'requestee': user}]
