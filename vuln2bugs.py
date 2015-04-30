@@ -152,6 +152,7 @@ class VulnProcessor():
         short_list = ''
         pkg_affected = dict()
         oldest_all = 0
+        oldest = 0
 
         # Unroll all vulns
         for a in assets:
