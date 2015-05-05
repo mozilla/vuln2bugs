@@ -405,6 +405,9 @@ def bug_type_flat(config, team, teamvulns, processor):
         #No more vulnerablities? Woot! Close the bug!
         if (vulns_len == 0):
             close = True
+            if (bug == None or len(bug) == 0):
+                debug('No vulnerabilities found for {}, no previous bug found, nothing to do!'.format(team))
+                return
         else:
             close = False
         update_bug(config, teamcfg, bug_title, bug_body, ba, bug, close)
