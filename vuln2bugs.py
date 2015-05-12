@@ -476,7 +476,7 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
     #Safety stuff - never edit bugs that aren't ours
     #These asserts should normally never trigger
     assert bug.creator == config['bugzilla']['creator']
-    assert bug.whiteboard.startswith('autoentry')
+    assert bug.whiteboard.find('autoentry') != -1
 
     any_update = False
 
