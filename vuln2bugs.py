@@ -500,14 +500,14 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
         due = h.split(' ')[0]
         debug('Bug completion is due by {}'.format(due))
     except IndexError:
-        due = today
+        due_dt = today
         debug('No due date found in whiteboard tag, hmm, maybe someone removed it')
-    try:
-        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
-    except ValueError:
-        debug('Due date found in whiteboard tag seems invalid, resetting to today')
-        due = today
-        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
+    else:
+        try:
+            due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
+        except ValueError:
+            debug('Due date found in whiteboard tag seems invalid, resetting to today')
+            due_dt = today
 
     new_hashes = {}
     for a in attachments:
@@ -550,7 +550,7 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
             if (set_needinfo(b, bug, bug.assigned_to)):
                 bug_update = bugzilla.DotDict()
                 b.post_comment(bug.id, 'Bug is past due date (out of SLA - was due for {due}, we are {today}).'.format(
-                        due=due, today=today.strftime('%Y-%m-%d')))
+                        due=due_tr.strftime('%Y-%m-%d'), today=today.strftime('%Y-%m-%d')))
                 b.put_bug(bug.id, bug_update)
 
 def main():
