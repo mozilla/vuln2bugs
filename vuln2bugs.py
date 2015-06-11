@@ -493,13 +493,21 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
             b.put_bug(bug.id, bug_update)
             return
 
+    # Due date checks
+    today = toUTC(datetime.now())
     try:
         h = bug.whiteboard.split('v2b-duedate=')[1]
         due = h.split(' ')[0]
         debug('Bug completion is due by {}'.format(due))
     except IndexError:
-        due = toUTC(datetime.now())
+        due = today
         debug('No due date found in whiteboard tag, hmm, maybe someone removed it')
+    try:
+        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
+    except ValueError:
+        debug('Due date found in whiteboard tag seems invalid, resetting to today')
+        due = today
+        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
 
     new_hashes = {}
     for a in attachments:
@@ -538,8 +546,6 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
 
     #Do we need to autoremind?
     elif (bug.whiteboard.find('v2b-autoremind') != -1):
-        today = toUTC(datetime.now())
-        due_dt = toUTC(datetime.strptime(due, "%Y-%m-%d"))
         if (due_dt < today):
             if (set_needinfo(b, bug, bug.assigned_to)):
                 bug_update = bugzilla.DotDict()
