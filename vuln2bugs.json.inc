@@ -19,6 +19,8 @@
 	//Operator is a pretty special one. If it's not set only operator:none with the given autogroup will be selected.
 	//If it IS set, then BOTH operator:none and operator:<what-you-set> will be selected by the given autogroup.
 	//Operator names match the autogroup names when present
+	// If includeservices is in a team configuration and set to true, extended service information will be
+	// incorporated with the bug if it is available
 	"teamsetup": {
 		"myteam": {
 			"operator": "IT",
