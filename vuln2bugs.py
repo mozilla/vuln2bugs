@@ -119,14 +119,16 @@ def bug_create(config, teamcfg, title, body, attachments):
 
 class VulnProcessor():
     '''The VulnProcessor takes a teamvuln object and extra prettyfi-ed data as strings, lists, etc'''
-    def __init__(self, config, teamvulns):
+    def __init__(self, config, teamvulns, team):
         self.teamvulns = teamvulns
         self.config = config
-        a, b, c, d = self.process_vuln_flatmode(config, teamvulns.assets, teamvulns.vulnerabilities_per_asset)
+        a, b, c, d, e = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets,
+            teamvulns.vulnerabilities_per_asset, teamvulns.services_per_asset)
         self.full_text_output = a
         self.short_csv = b
         self.affected_packages_list = c
         self.oldest = d
+        self.withservices_csv = e
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -140,19 +142,31 @@ class VulnProcessor():
     def get_short_csv(self):
         return self.short_csv
 
+    def get_withservices_csv(self):
+        return self.withservices_csv
+
     def get_affected_packages_list(self):
         return self.affected_packages_list
 
     def get_oldest(self):
         return self.oldest
 
-    def process_vuln_flatmode(self, teamcfg, assets, vulns):
+    def process_vuln_flatmode(self, teamcfg, assets, vulns, services):
         '''Preparser that could use some refactoring.'''
         textdata = ''
         short_list = ''
+        withservices_list = ''
         pkg_affected = dict()
         oldest_all = 0
         oldest = 0
+
+        # See if we want to incorporate service information
+        includeservices = False
+        if 'includeservices' in teamcfg and teamcfg['includeservices']:
+            includeservices = True
+
+        # Include a header with the services list
+        withservices_list += '# hostname,ip,techowner,requirestcw,packages...\n'
 
         # Unroll all vulns
         for a in assets:
@@ -162,6 +176,8 @@ class VulnProcessor():
             ages = list()
             patch_in = list()
             cves = list()
+            requirestcw = None
+            techowner = None
             for v in vulns[a.assetid]:
                 risks       += [v.impact_label.upper()]
                 proofs      += [v.proof]
@@ -169,6 +185,17 @@ class VulnProcessor():
                 ages        += [v.age_days]
                 cves        += v.cves
                 patch_in    += [v.patch_in]
+                # If includeservices is set, if any service information is found in the vulnerability
+                # list we will use that data in the service output attachment
+                if includeservices:
+                    requirestcw = 'na'
+                    techowner = 'na'
+                    serviceent = services[a.assetid]
+                    if serviceent != None:
+                        if serviceent.techowner != None:
+                            techowner = serviceent.techowner
+                        if serviceent.tcw != None:
+                            requirestcw = serviceent.tcw
 
             #pkg_vuln = Counter(proofs).most_common()
             pkgs = list()
@@ -229,11 +256,14 @@ Packages to upgrade: {packages}
                 )
 
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
+            # If includeservices is set, build an additional attachment that includes this information
+            if includeservices:
+                withservices_list += "{hostname},{ip},{techowner},{requirestcw},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, techowner=techowner, requirestcw=requirestcw, pkg=str.join(' ',pkgs))
             textdata += data
             if oldest > oldest_all:
                 oldest_all = oldest
 
-        return (textdata, short_list, pkg_affected, oldest)
+        return (textdata, short_list, pkg_affected, oldest, withservices_list)
 
     def parse_proof(self, proof):
         '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
@@ -271,6 +301,19 @@ class TeamVulns():
         self.assets = self.get_assets()
         # Sort out vulnerabilities
         self.vulnerabilities_per_asset = self.get_vulns_per_asset()
+        # Sort out services
+        self.services_per_asset = self.get_services_per_asset()
+
+    def get_services_per_asset(self):
+        '''Returns a dict-struct like this:
+        servies_per_asset[assetid] = serviceinfo
+        '''
+        services_per_asset = dict()
+
+        for i in self.raw:
+                services_per_asset[i.asset.assetid] = i.service
+
+        return services_per_asset
 
     def get_vulns_per_asset(self):
         '''Returns a dict-struct like this:
@@ -371,6 +414,7 @@ def bug_type_flat(config, team, teamvulns, processor):
 
     full_text = processor.get_full_text_output()
     short_csv = processor.get_short_csv()
+    withservices_csv = processor.get_withservices_csv()
     pkgs = processor.get_affected_packages_list()
     oldest = processor.get_oldest()
     vulns_len = len(teamvulns.assets)
@@ -383,6 +427,12 @@ def bug_type_flat(config, team, teamvulns, processor):
     ba[1].file_name = 'detailled_list.txt'
     ba[1].summary = 'Details including CVEs, OS, etc. affected'
     ba[1].data = full_text
+    if 'includeservices' in teamcfg and teamcfg['includeservices']:
+        ba.append(bugzilla.DotDict())
+        # Include the services related attachment
+        ba[2].file_name = 'extended_list.txt'
+        ba[2].summary = 'CSV list using service information'
+        ba[2].data = withservices_csv
 
     today = toUTC(datetime.now())
     sla = today + timedelta(days=7)
@@ -565,7 +615,7 @@ def main():
     for team in teams:
         debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
         teamvulns = TeamVulns(config, team)
-        processor = VulnProcessor(config, teamvulns)
+        processor = VulnProcessor(config, teamvulns, team)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
         bug_type_flat(config, team, teamvulns, processor)
 
