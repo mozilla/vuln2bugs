@@ -52,6 +52,7 @@ from datetime import timedelta
 import hjson as json
 from io import StringIO
 from collections import Counter
+import re
 import hashlib
 import base64
 import socket
@@ -266,6 +267,63 @@ Packages to upgrade: {packages}
         return (textdata, short_list, pkg_affected, oldest, withservices_list)
 
     def parse_proof(self, proof):
+        '''Attempt to detect the way the proof field has been formatted, and
+        hand the data off to a suitable parser
+        '''
+        # Just ignore the Windows proofs
+        if re.match('.*Vulnerable OS: Microsoft Windows.*', proof) or re.match('.*HKEY_LOCAL_MACHINE.*', proof):
+            return {'pkg': 'Unsupported format', 'os': 'Unsupported format', 'version': 'Unsupported format'}
+        if re.match('.+\d+Vulnerable software installed.+', proof):
+            return self.parse_proof_method_usn(proof)
+        elif re.match('^Vulnerable software installed:.+', proof):
+            return self.parse_proof_method_swonly(proof)
+        # Fallback to the most common method
+        return self.parse_proof_method_rhsa(proof)
+
+    def parse_proof_method_swonly(self, proof):
+        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
+        Vulnerable software installed: HP Device Control 09.10.00.00
+
+        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
+        or None if parsing failed.
+        '''
+        osname = ''
+        pkg = ''
+        version = ''
+
+        try:
+            tmp = proof.split('Vulnerable software installed: ')[1].split()
+            version = tmp[-1]
+            pkg = ' '.join(tmp[:-1])
+            os = 'Undefined OS'
+        except:
+            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
+
+        return {'pkg': pkg, 'os': osname, 'version': version}
+
+    def parse_proof_method_usn(self, proof):
+        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
+        Vulnerable OS: Ubuntu Linux 12.04Vulnerable software installed: Ubuntu tcpdump 4.2.1-1ubuntu2
+
+        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
+        or None if parsing failed.
+        '''
+        osname = ''
+        pkg = ''
+        version = ''
+
+        try:
+            tmp = proof.split('Vulnerable software installed: ')
+            os = tmp[0].split('Vulnerable OS: ')[1]
+            tmp = tmp[1].split(' ')
+            pkg = tmp[-2]
+            version = tmp[-1]
+        except:
+            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
+
+        return {'pkg': pkg, 'os': osname, 'version': version}
+        
+    def parse_proof_method_rhsa(self, proof):
         '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
         Vulnerable OS: Red Hat Enterprise Linux 5.5 * krb5-libs - version 1.6.1-55.el5_6.1 is installed
 
