@@ -19,8 +19,11 @@
 	//Operator is a pretty special one. If it's not set only operator:none with the given autogroup will be selected.
 	//If it IS set, then BOTH operator:none and operator:<what-you-set> will be selected by the given autogroup.
 	//Operator names match the autogroup names when present
-	// If includeservices is in a team configuration and set to true, extended service information will be
-	// incorporated with the bug if it is available
+	//If includeservices is in a team configuration and set to true, extended service information will be
+	//incorporated with the bug if it is available
+	//If subgroup is set this value will be used in the v2b-subgroup whiteboard tag, if unset default will be
+	//used. If the same bugzilla component is used for more than one bug, the subgroup should be set to different values
+	//so vuln2bugs can distinguish between them.
 	"teamsetup": {
 		"myteam": {
 			"operator": "IT",
