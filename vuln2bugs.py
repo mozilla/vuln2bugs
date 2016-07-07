@@ -273,13 +273,41 @@ Packages to upgrade: {packages}
         '''
         # Just ignore the Windows proofs
         if re.match('.*Vulnerable OS: Microsoft Windows.*', proof) or re.match('.*HKEY_LOCAL_MACHINE.*', proof):
-            return {'pkg': 'Unsupported format', 'os': 'Unsupported format', 'version': 'Unsupported format'}
+            return self.parse_proof_method_windows(proof)
         if re.match('.+\d+Vulnerable software installed.+', proof):
             return self.parse_proof_method_usn(proof)
         elif re.match('^Vulnerable software installed:.+', proof):
             return self.parse_proof_method_swonly(proof)
         # Fallback to the most common method
         return self.parse_proof_method_rhsa(proof)
+
+    def parse_proof_method_windows(self, proof):
+        '''Attempt to parse proofs as are returned from Windows systems. These can vary
+        a great deal, so best effort here.
+        '''
+        ret = {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
+        # First try to extract the impacted software
+        mtchresw = re.compile('.*Vulnerable software installed: (.+?)(Vulnerable OS|\*|Based|$)')
+        results = mtchresw.search(proof)
+        if results != None:
+            ret['pkg'] = results.group(1).strip()
+        # Next try to get the OS
+        mtchreos = re.compile('.*Vulnerable OS: (.+?)(Vulnerable software|Based|$)')
+        results = mtchreos.search(proof)
+        if results != None:
+            ret['os'] = results.group(1).strip()
+        # Lastly try to get the version
+        mtchrever = re.compile('affected version - (.+?)\*')
+        results = mtchrever.search(proof)
+        if results != None:
+            ret['version'] = results.group(1).strip()
+        else:
+            # It's possible the version is tacked onto the extracted package name, if we have something
+            # that looks like a version string here use that
+            results = re.search('(\d+\.[\d.]+)', ret['pkg'])
+            if results != None:
+                ret['version'] = results.group(1)
+        return ret
 
     def parse_proof_method_swonly(self, proof):
         '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
