@@ -108,7 +108,8 @@ def bug_create(config, teamcfg, title, body, attachments):
     bug.description = body
     today = toUTC(datetime.now())
     sla = today + timedelta(days=7)
-    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={}'.format(sla.strftime('%Y-%m-%d'))
+    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-subgroup={}'.format(sla.strftime('%Y-%m-%d'),
+        teamcfg['subgroup'])
     bug.priority = teamcfg['priority']
     bug.severity = teamcfg['severity']
     bug = b.post_bug(bug)
@@ -527,7 +528,8 @@ def find_latest_open_bug(config, team):
 
     terms = [{'product': teamcfg['product']}, {'component': teamcfg['component']},
             {'creator': config['bugzilla']['creator']}, {'whiteboard': 'autoentry'}, {'resolution': ''},
-            {'status': 'NEW'}, {'status': 'ASSIGNED'}, {'status': 'REOPENED'}, {'status': 'UNCONFIRMED'}]
+            {'status': 'NEW'}, {'status': 'ASSIGNED'}, {'status': 'REOPENED'}, {'status': 'UNCONFIRMED'},
+            {'whiteboard': 'v2b-subgroup={}'.format(teamcfg['subgroup'])}]
     bugs = b.search_bugs(terms)['bugs']
     #Newest only
     try:
@@ -671,7 +673,9 @@ def main():
 
     # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] an mydict.hi
     for team in teams:
-        debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
+        if 'subgroup' not in teams[team]:
+            teams[team]['subgroup'] = 'default'
+        debug('Processing team: {} (subgroup {}) using filter {}'.format(team, teams[team]['subgroup'], teams[team]['filter']))
         teamvulns = TeamVulns(config, team)
         processor = VulnProcessor(config, teamvulns, team)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
