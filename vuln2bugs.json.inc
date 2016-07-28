@@ -13,20 +13,17 @@
 		"api_key": ""
 	},
 
+	//Set to link to include to service-map raw owners list
+	"eisowners": "https://service-map/api/v1/owners",
+
 	//These teams need to exist (autogroup in mozdef)
 	//Note that the opposite can also happen where teams get created in mozdef, but not configured here
 	//Either way missing or extra teams will not get bugs assigned, of course.
-	//Operator is a pretty special one. If it's not set only operator:none with the given autogroup will be selected.
-	//If it IS set, then BOTH operator:none and operator:<what-you-set> will be selected by the given autogroup.
-	//Operator names match the autogroup names when present
 	//If includeservices is in a team configuration and set to true, extended service information will be
 	//incorporated with the bug if it is available
-	//If subgroup is set this value will be used in the v2b-subgroup whiteboard tag, if unset default will be
-	//used. If the same bugzilla component is used for more than one bug, the subgroup should be set to different values
-	//so vuln2bugs can distinguish between them.
 	"teamsetup": {
 		"myteam": {
-			"operator": "IT",
+			"name": "nicerteamname",
 			"filter": "most-critical-only",
 			"product": "myproduct",
 			"component": "mycomponent",

@@ -11,7 +11,6 @@
 #
 #{'asset': {'assetid': 410,
 #           'autogroup': 'opsec',
-#           'operator': 'none',
 #           'hostname': 'orangefactor1.dmz.phx1.mozilla.com',
 #           'ipv4address': '10.8.74.53',
 #           'macaddress': '005056942621',
@@ -93,7 +92,7 @@ def toUTC(suspectedDate, localTimeZone=None):
 
     return objDate
 
-def bug_create(config, teamcfg, title, body, attachments):
+def bug_create(config, team, teamcfg, title, body, attachments):
     '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup' '''
     url = config['bugzilla']['host']
     b = bugzilla.Bugzilla(url=url+'/rest/', api_key=config['bugzilla']['api_key'])
@@ -108,8 +107,7 @@ def bug_create(config, teamcfg, title, body, attachments):
     bug.description = body
     today = toUTC(datetime.now())
     sla = today + timedelta(days=7)
-    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-subgroup={}'.format(sla.strftime('%Y-%m-%d'),
-        teamcfg['subgroup'])
+    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-key={}'.format(sla.strftime('%Y-%m-%d'), team)
     bug.priority = teamcfg['priority']
     bug.severity = teamcfg['severity']
     bug = b.post_bug(bug)
@@ -443,22 +441,14 @@ class TeamVulns():
             td = 24
         begindateUTC = toUTC(datetime.now() - timedelta(hours=td))
         enddateUTC= toUTC(datetime.now())
+        print begindateUTC, enddateUTC
         fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
-        # Default filter - operator
-        try:
-            operator = self.config['teamsetup'][self.team]['operator']
-        except KeyError:
-            debug('No operator defined, defaulting to any')
-            operator = None
 
         # Load team queries from our json config.
         # Lists are "should" unless an item is negated with "!" then it's must_not
         # Single items are "must"
         query = pyes.query.BoolQuery()
-        query.add_must(pyes.MatchQuery('asset.autogroup', self.team))
-        if operator != None:
-            query.add_should(pyes.MatchQuery('asset.operator', operator))
-        query.add_should(pyes.MatchQuery('asset.operator', 'unknown'))
+        query.add_must(pyes.QueryStringQuery('asset.autogroup: "{}"'.format(self.team)))
         for item in self.config['es'][teamfilter]:
             # items starting with '_' are internal/reserved, like _time_period
             if (item.startswith('_')):
@@ -531,13 +521,14 @@ def bug_type_flat(config, team, teamvulns, processor):
     for i in pkgs:
         bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
     bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
+    bug_body += "\n\nCurrent ownership mapping for all known hosts can be obtained from {}".format(config['eisowners'])
 
     # Only make a new bug if no old one exists
     bug_title = "[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
-                vulns_len, team, teamcfg['filter'])
+                vulns_len, teamcfg['name'], teamcfg['filter'])
     bug = find_latest_open_bug(config, team)
     if ((bug == None) and (vulns_len > 0)):
-        bug_create(config, teamcfg, bug_title, bug_body, ba)
+        bug_create(config, team, teamcfg, bug_title, bug_body, ba)
     else:
         #No more vulnerablities? Woot! Close the bug!
         if (vulns_len == 0):
@@ -557,7 +548,7 @@ def find_latest_open_bug(config, team):
     terms = [{'product': teamcfg['product']}, {'component': teamcfg['component']},
             {'creator': config['bugzilla']['creator']}, {'whiteboard': 'autoentry'}, {'resolution': ''},
             {'status': 'NEW'}, {'status': 'ASSIGNED'}, {'status': 'REOPENED'}, {'status': 'UNCONFIRMED'},
-            {'whiteboard': 'v2b-subgroup={}'.format(teamcfg['subgroup'])}]
+            {'whiteboard': 'v2b-key={}'.format(team)}]
     bugs = b.search_bugs(terms)['bugs']
     #Newest only
     try:
@@ -701,9 +692,9 @@ def main():
 
     # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] an mydict.hi
     for team in teams:
-        if 'subgroup' not in teams[team]:
-            teams[team]['subgroup'] = 'default'
-        debug('Processing team: {} (subgroup {}) using filter {}'.format(team, teams[team]['subgroup'], teams[team]['filter']))
+        if 'name' not in teams[team]:
+            teams[team]['name'] = team
+        debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
         teamvulns = TeamVulns(config, team)
         processor = VulnProcessor(config, teamvulns, team)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
