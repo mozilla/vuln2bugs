@@ -55,6 +55,7 @@ import re
 import hashlib
 import base64
 import socket
+import getopt
 
 from bugzilla import *
 
@@ -682,8 +683,25 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
                         due=due_dt.strftime('%Y-%m-%d'), today=today.strftime('%Y-%m-%d')))
                 b.put_bug(bug.id, bug_update)
 
+def usage():
+    sys.stdout.write('usage: vuln2bugs.py [-h] [-t team]\n')
+
 def main():
     debug('Debug mode on')
+
+    singleteam = None
+    try:
+        optlist, args = getopt.getopt(sys.argv[1:], 'ht:')
+    except getopt.GetoptError as err:
+        sys.stderr.write(str(err) + '\n')
+        usage()
+        sys.exit(1)
+    for o, a in optlist:
+        if o == '-h':
+            usage()
+            sys.exit(0)
+        elif o == '-t':
+            singleteam = a
 
     with open('vuln2bugs.json') as fd:
         config = json.load(fd)
@@ -692,6 +710,8 @@ def main():
 
     # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] an mydict.hi
     for team in teams:
+        if singleteam != None and team != singleteam:
+            continue
         if 'name' not in teams[team]:
             teams[team]['name'] = team
         debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
