@@ -684,7 +684,7 @@ def update_bug(config, teamcfg, title, body, attachments, bug, close):
                 b.put_bug(bug.id, bug_update)
 
 def usage():
-    sys.stdout.write('usage: vuln2bugs.py [-h] [-t team]\n')
+    sys.stdout.write('usage: {} [-h] [-t team]\n'.format(sys.argv[0]))
 
 def main():
     debug('Debug mode on')
