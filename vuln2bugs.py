@@ -266,7 +266,7 @@ Packages to upgrade: {packages}
             if oldest > oldest_all:
                 oldest_all = oldest
 
-        return (textdata, short_list, pkg_affected, oldest, withservices_list)
+        return (textdata, short_list, pkg_affected, oldest_all, withservices_list)
 
     def parse_proof(self, proof):
         '''Attempt to detect the way the proof field has been formatted, and
