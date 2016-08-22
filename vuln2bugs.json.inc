@@ -13,6 +13,9 @@
 		"api_key": ""
 	},
 
+	//Link to include in bug pointing to documentation
+	"doclink": "https://url/vulnerability_management/",
+
 	//Set to link to include to service-map raw owners list
 	"eisowners": "https://service-map/api/v1/owners",
 
