@@ -61,6 +61,8 @@ from bugzilla import *
 
 DEBUG = True
 
+SLADAYS = 90
+
 def debug(msg):
     if DEBUG:
         sys.stderr.write('+++ {}\n'.format(msg))
@@ -107,7 +109,7 @@ def bug_create(config, team, teamcfg, title, body, attachments):
     bug.groups = teamcfg['groups']
     bug.description = body
     today = toUTC(datetime.now())
-    sla = today + timedelta(days=7)
+    sla = today + timedelta(days=SLADAYS)
     bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-key={}'.format(sla.strftime('%Y-%m-%d'), team)
     bug.priority = teamcfg['priority']
     bug.severity = teamcfg['severity']
@@ -513,16 +515,17 @@ def bug_type_flat(config, team, teamvulns, processor):
         ba[2].data = withservices_csv
 
     today = toUTC(datetime.now())
-    sla = today + timedelta(days=7)
+    sla = today + timedelta(days=SLADAYS)
 
     bug_body = "{} hosts affected by filter {}\n".format(vulns_len, teamcfg['filter'])
     bug_body += "At time of report, the oldest vulnerability is {age} day(s) old.\n".format(age=oldest)
-    bug_body += "Expected time to patch: 7 days, before {sla}.\n\n".format(sla=sla.strftime('%Y-%m-%d'))
+    bug_body += "Expected time to patch: {} days, before {sla}.\n\n".format(SLADAYS, sla=sla.strftime('%Y-%m-%d'))
     bug_body += "({}) Packages affected:\n".format(len(pkgs))
     for i in pkgs:
         bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
     bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
     bug_body += "\n\nCurrent ownership mapping for all known hosts can be obtained from {}".format(config['eisowners'])
+    bug_body += "\n\nEscalation process details can be obtained from {}".format(config['doclink'])
 
     # Only make a new bug if no old one exists
     bug_title = "[{} hosts] Bulk vulnerability report for {} using filter: {}".format(
