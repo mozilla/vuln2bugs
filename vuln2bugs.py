@@ -717,7 +717,7 @@ def main():
 
     teams = config['teamsetup']
 
-    # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] an mydict.hi
+    # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] and mydict.hi
     for team in teams:
         if singleteam != None and team != singleteam:
             continue
