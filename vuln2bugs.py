@@ -131,13 +131,10 @@ class VulnProcessor():
     def __init__(self, config, teamvulns, team):
         self.teamvulns = teamvulns
         self.config = config
-        a, b, c, d, e = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets,
-            teamvulns.vulnerabilities_per_asset, teamvulns.services_per_asset)
+        a, b, c = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
         self.full_text_output = a
         self.short_csv = b
         self.affected_packages_list = c
-        self.oldest = d
-        self.withservices_csv = e
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -160,229 +157,59 @@ class VulnProcessor():
     def get_oldest(self):
         return self.oldest
 
-    def process_vuln_flatmode(self, teamcfg, assets, vulns, services):
+    def process_vuln_flatmode(self, teamcfg, assets):
         '''Preparser that could use some refactoring.'''
         textdata = ''
         short_list = ''
-        withservices_list = ''
         pkg_affected = dict()
-        oldest_all = 0
-        oldest = 0
-
-        # See if we want to incorporate service information
-        includeservices = False
-        if 'includeservices' in teamcfg and teamcfg['includeservices']:
-            includeservices = True
-
-        # Include a header with the services list
-        withservices_list += '# hostname,ip,techowner,requirestcw,packages...\n'
 
         # Unroll all vulns
-        for a in assets:
+        for assetip in assets:
+            assetdata = assets[assetip]
             risks = list()
-            proofs = list()
-            titles = list()
-            ages = list()
-            patch_in = list()
-            cves = list()
-            requirestcw = None
-            techowner = None
-            for v in vulns[a.assetid]:
-                risks       += [v.impact_label.upper()]
-                proofs      += [v.proof]
-                titles      += [v.title]
-                ages        += [v.age_days]
-                cves        += v.cves
-                patch_in    += [v.patch_in]
-                # If includeservices is set, if any service information is found in the vulnerability
-                # list we will use that data in the service output attachment
-                if includeservices:
-                    requirestcw = 'na'
-                    techowner = 'na'
-                    serviceent = services[a.assetid]
-                    if serviceent != None:
-                        if serviceent.techowner != None:
-                            techowner = serviceent.techowner
-                        if serviceent.tcw != None:
-                            requirestcw = serviceent.tcw
-
-            #pkg_vuln = Counter(proofs).most_common()
             pkgs = list()
-            pkg_parsed = True
-            pkg_ver = dict()
-            for i in proofs:
-                p = self.parse_proof(i)
-                pname = p['pkg']
-                pver = p['version']
-                if p == None:
-                    pkg_parsed = False
-                    pkgs += [i]
-                    pkg_affected[i] = 'Unknown'
+            titles = list()
+            cves = list()
+
+            if len(assetdata['vulnerabilities']) == 0:
+                continue
+
+            for v in assetdata['vulnerabilities']:
+                risks       += [v.risk.upper()]
+                titles      += [v.name]
+                pkgs        += v.vulnerable_packages
+                if v.cve != None:
+                    cves        += [v.cve]
                 else:
-                    pkg_ver[pname] = pver
-                    pkgs += [pname]
-                    try:
-                        pkg_affected[pname] += [pver]
-                        pkg_affected[pname] = list(set(pkg_affected[pname]))
-                    except KeyError:
-                        pkg_affected[pname] = [pver]
+                    cves += ['CVE-NOTAVAILABLE']
 
             # Uniquify
             pkgs    = sorted(set(pkgs))
             risks   = sorted(set(risks))
             cves    = sorted(set(cves))
 
-            if pkg_parsed:
-                pkgs_pretty = list()
-                for i in pkgs:
-                    pkgs_pretty += ['{} (affected version {})'.format(i, self.summarize(pkg_ver[i]))]
-            else:
-                pkgs_pretty = pkgs
-
-            # What's the oldest vuln found in this asset?
-            oldest = 0
-
-            for i in ages:
-                if i > oldest:
-                    oldest = i
-
             data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
-Risk: {risk} - oldest vulnerability has been seen on these systems {age} day(s) ago at the time of report generation.
-CVES: {cve}.
+Risk: {risk}
+CVES: {cve}
 OS: {osname}
 Packages to upgrade: {packages}
 -------------------------------------------------------------------------------------
 
-""".format(hostname     = a.hostname,
-                ipv4        = a.ipv4address,
-                nr_vulns    = len(vulns[a.assetid]),
+""".format(hostname     = assetdata.asset.hostname,
+                ipv4        = assetdata.asset.ipaddress,
+                nr_vulns    = len(assetdata.vulnerabilities),
                 risk        = str.join(',', risks),
-                age         = oldest,
                 cve         = self.summarize(str.join(',', cves)),
-                osname      = a.os,
-                packages    = str.join(',', pkgs_pretty),
+                osname      = assetdata.asset.os,
+                packages    = str.join(',', pkgs),
                 )
 
-            short_list += "{hostname},{ip},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, pkg=str.join(' ', pkgs))
-            # If includeservices is set, build an additional attachment that includes this information
-            if includeservices:
-                withservices_list += "{hostname},{ip},{techowner},{requirestcw},{pkg}\n".format(hostname=a.hostname, ip=a.ipv4address, techowner=techowner, requirestcw=requirestcw, pkg=str.join(' ',pkgs))
+            short_list += "{hostname},{ip},{pkg}\n".format(hostname=assetdata.asset.hostname, \
+                    ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
             textdata += data
-            if oldest > oldest_all:
-                oldest_all = oldest
 
-        return (textdata, short_list, pkg_affected, oldest_all, withservices_list)
-
-    def parse_proof(self, proof):
-        '''Attempt to detect the way the proof field has been formatted, and
-        hand the data off to a suitable parser
-        '''
-        # Just ignore the Windows proofs
-        if re.match('.*Vulnerable OS: Microsoft Windows.*', proof) or re.match('.*HKEY_LOCAL_MACHINE.*', proof):
-            return self.parse_proof_method_windows(proof)
-        if re.match('.+\d+Vulnerable software installed.+', proof):
-            return self.parse_proof_method_usn(proof)
-        elif re.match('^Vulnerable software installed:.+', proof):
-            return self.parse_proof_method_swonly(proof)
-        # Fallback to the most common method
-        return self.parse_proof_method_rhsa(proof)
-
-    def parse_proof_method_windows(self, proof):
-        '''Attempt to parse proofs as are returned from Windows systems. These can vary
-        a great deal, so best effort here.
-        '''
-        ret = {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
-        # First try to extract the impacted software
-        mtchresw = re.compile('.*Vulnerable software installed: (.+?)(Vulnerable OS|\*|Based|$)')
-        results = mtchresw.search(proof)
-        if results != None:
-            ret['pkg'] = results.group(1).strip()
-        # Next try to get the OS
-        mtchreos = re.compile('.*Vulnerable OS: (.+?)(Vulnerable software|Based|$)')
-        results = mtchreos.search(proof)
-        if results != None:
-            ret['os'] = results.group(1).strip()
-        # Lastly try to get the version
-        mtchrever = re.compile('affected version - (.+?)\*')
-        results = mtchrever.search(proof)
-        if results != None:
-            ret['version'] = results.group(1).strip()
-        else:
-            # It's possible the version is tacked onto the extracted package name, if we have something
-            # that looks like a version string here use that
-            results = re.search('(\d+\.[\d.]+)', ret['pkg'])
-            if results != None:
-                ret['version'] = results.group(1)
-        return ret
-
-    def parse_proof_method_swonly(self, proof):
-        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
-        Vulnerable software installed: HP Device Control 09.10.00.00
-
-        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
-        or None if parsing failed.
-        '''
-        osname = ''
-        pkg = ''
-        version = ''
-
-        try:
-            tmp = proof.split('Vulnerable software installed: ')[1].split()
-            version = tmp[-1]
-            pkg = ' '.join(tmp[:-1])
-            os = 'Undefined OS'
-        except:
-            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
-
-        return {'pkg': pkg, 'os': osname, 'version': version}
-
-    def parse_proof_method_usn(self, proof):
-        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
-        Vulnerable OS: Ubuntu Linux 12.04Vulnerable software installed: Ubuntu tcpdump 4.2.1-1ubuntu2
-
-        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
-        or None if parsing failed.
-        '''
-        osname = ''
-        pkg = ''
-        version = ''
-
-        try:
-            tmp = proof.split('Vulnerable software installed: ')
-            os = tmp[0].split('Vulnerable OS: ')[1]
-            tmp = tmp[1].split(' ')
-            pkg = tmp[-2]
-            version = tmp[-1]
-        except:
-            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
-
-        return {'pkg': pkg, 'os': osname, 'version': version}
-        
-    def parse_proof_method_rhsa(self, proof):
-        '''Finds a package name, os, etc. in a proof-style (nexpose) string, such as:
-        Vulnerable OS: Red Hat Enterprise Linux 5.5 * krb5-libs - version 1.6.1-55.el5_6.1 is installed
-
-        Returns a dict = {'pkg': 'package name', 'os': 'os name', 'version': 'installed version'}
-        or None if parsing failed.
-        '''
-        osname = ''
-        pkg = ''
-        version = ''
-
-        try:
-            tmp = proof.split('Vulnerable OS: ')[1]
-            tmp = tmp.split('*')
-            osname = tmp[0].strip()
-            # spaces matter in the split - as package names never contain spaces, but may contain dashes
-            tmp = tmp[1].split(' - ')
-            pkg = tmp[0].lstrip().strip()
-            tmp = str.join('', tmp[1:]).split('version ')[1]
-            version = tmp.split(' is installed')[0]
-        except:
-            return {'pkg': 'No package name provided', 'os': 'No OS name provided', 'version': 'No version provided'}
-
-        return {'pkg': pkg, 'os': osname, 'version': version}
+        return (textdata, short_list, pkgs)
 
 class TeamVulns():
     '''TeamVulns extract the vulnerability data from MozDef and sorts it into clear structures'''
