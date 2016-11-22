@@ -178,7 +178,7 @@ class VulnProcessor():
                 titles      += [v.name]
                 pkgs        += v.vulnerable_packages
                 if v.cve != None:
-                    cves        += [v.cve]
+                    cves += [v.cve]
                 else:
                     cves += ['CVE-NOTAVAILABLE']
 
