@@ -433,7 +433,7 @@ class TeamVulns():
             if not i.asset in assets:
                 assets += [i.asset]
 
-        assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipv4address']))
+        assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipaddress']))
 
         return assets
 
