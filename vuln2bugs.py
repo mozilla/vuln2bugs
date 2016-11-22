@@ -395,19 +395,6 @@ class TeamVulns():
         self.assets = self.get_assets()
         # Sort out vulnerabilities
         self.vulnerabilities_per_asset = self.get_vulns_per_asset()
-        # Sort out services
-        self.services_per_asset = self.get_services_per_asset()
-
-    def get_services_per_asset(self):
-        '''Returns a dict-struct like this:
-        servies_per_asset[assetid] = serviceinfo
-        '''
-        services_per_asset = dict()
-
-        for i in self.raw:
-                services_per_asset[i.asset.assetid] = i.service
-
-        return services_per_asset
 
     def get_vulns_per_asset(self):
         '''Returns a dict-struct like this:
