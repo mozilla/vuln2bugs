@@ -165,7 +165,7 @@ class VulnProcessor():
         # Unroll all vulns
         for assetip in assets:
             assetdata = assets[assetip]
-            risks = list()
+            impacts = list()
             pkgs = list()
             titles = list()
             cves = list()
@@ -174,7 +174,7 @@ class VulnProcessor():
                 continue
 
             for v in assetdata['vulnerabilities']:
-                risks       += [v.risk.upper()]
+                impacts     += [v.risk.upper()]
                 titles      += [v.name]
                 pkgs        += v.vulnerable_packages
                 if v.cve != None:
@@ -184,12 +184,12 @@ class VulnProcessor():
 
             # Uniquify
             pkgs    = sorted(set(pkgs))
-            risks   = sorted(set(risks))
+            impacts = sorted(set(impacts))
             cves    = sorted(set(cves))
 
             data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
-Risk: {risk}
+Impact: {impact}
 CVES: {cve}
 OS: {osname}
 Packages to upgrade: {packages}
@@ -198,7 +198,7 @@ Packages to upgrade: {packages}
 """.format(hostname     = assetdata.asset.hostname,
                 ipv4        = assetdata.asset.ipaddress,
                 nr_vulns    = len(assetdata.vulnerabilities),
-                risk        = str.join(',', risks),
+                impact      = str.join(',', impacts),
                 cve         = self.summarize(str.join(',', cves)),
                 osname      = assetdata.asset.os,
                 packages    = str.join(',', pkgs),
