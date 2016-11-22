@@ -131,10 +131,9 @@ class VulnProcessor():
     def __init__(self, config, teamvulns, team):
         self.teamvulns = teamvulns
         self.config = config
-        a, b, c = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
+        a, b = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
         self.full_text_output = a
         self.short_csv = b
-        self.affected_packages_list = c
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -209,7 +208,7 @@ Packages to upgrade: {packages}
                     ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
             textdata += data
 
-        return (textdata, short_list, pkgs)
+        return (textdata, short_list)
 
 class TeamVulns():
     '''TeamVulns extract the vulnerability data from MozDef and sorts it into clear structures'''
