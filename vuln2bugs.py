@@ -131,9 +131,10 @@ class VulnProcessor():
     def __init__(self, config, teamvulns, team):
         self.teamvulns = teamvulns
         self.config = config
-        a, b = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
+        a, b, c = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
         self.full_text_output = a
         self.short_csv = b
+        self.total_affected_hosts = c
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -141,26 +142,21 @@ class VulnProcessor():
             return data[:dlen]+' (truncated)'
         return data
 
+    def get_total_affected_hosts(self):
+        return self.total_affected_hosts
+
     def get_full_text_output(self):
         return self.full_text_output
 
     def get_short_csv(self):
         return self.short_csv
 
-    def get_withservices_csv(self):
-        return self.withservices_csv
-
-    def get_affected_packages_list(self):
-        return self.affected_packages_list
-
-    def get_oldest(self):
-        return self.oldest
-
     def process_vuln_flatmode(self, teamcfg, assets):
         '''Preparser that could use some refactoring.'''
         textdata = ''
         short_list = ''
         pkg_affected = dict()
+        total_affected_hosts = 0
 
         # Unroll all vulns
         for assetip in assets:
@@ -172,6 +168,7 @@ class VulnProcessor():
 
             if len(assetdata['vulnerabilities']) == 0:
                 continue
+            total_affected_hosts += 1
 
             for v in assetdata['vulnerabilities']:
                 impacts     += [v.risk.upper()]
@@ -208,7 +205,7 @@ Packages to upgrade: {packages}
                     ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
             textdata += data
 
-        return (textdata, short_list)
+        return (textdata, short_list, total_affected_hosts)
 
 class TeamVulns():
     '''TeamVulns extract the vulnerability data from MozDef and sorts it into clear structures'''
@@ -278,10 +275,7 @@ def bug_type_flat(config, team, teamvulns, processor):
 
     full_text = processor.get_full_text_output()
     short_csv = processor.get_short_csv()
-    withservices_csv = processor.get_withservices_csv()
-    pkgs = processor.get_affected_packages_list()
-    oldest = processor.get_oldest()
-    vulns_len = len(teamvulns.assets)
+    vulns_len = processor.get_total_affected_hosts()
 
     # Attachments
     ba = [bugzilla.DotDict(), bugzilla.DotDict()]
@@ -301,13 +295,12 @@ def bug_type_flat(config, team, teamvulns, processor):
     today = toUTC(datetime.now())
     sla = today + timedelta(days=SLADAYS)
 
-    bug_body = "{} hosts affected by filter {}\n".format(vulns_len, teamcfg['filter'])
-    bug_body += "At time of report, the oldest vulnerability is {age} day(s) old.\n".format(age=oldest)
-    bug_body += "Expected time to patch: {} days, before {sla}.\n\n".format(SLADAYS, sla=sla.strftime('%Y-%m-%d'))
-    bug_body += "({}) Packages affected:\n".format(len(pkgs))
-    for i in pkgs:
-        bug_body += "{name}: {version}\n".format(name=i, version=','.join(pkgs[i]))
-    bug_body += "\n\nFor additional details, queries, graphs, etc. see also {}".format(config['mozdef']['dashboard_url'])
+    bug_body = 'Infosec vuln2bugs auto-triage for {}\n\n'.format(team)
+    bug_body += 'A number of hosts belonging to {} have been identified as requiring patches.\n'.format(team)
+    bug_body += 'Expected time to patch is within 90 days unless otherwise indicated by other\n'
+    bug_body += 'bugs. See the attachments for details, attachments are updated based on current\n'
+    bug_body += 'state each time vuln2bugs runs.\n'
+    bug_body += "\nFor additional details, queries, etc. see also {}".format(config['mozdef']['dashboard_url'])
     bug_body += "\n\nCurrent ownership mapping for all known hosts can be obtained from {}".format(config['eisowners'])
     bug_body += "\n\nEscalation process details can be obtained from {}".format(config['doclink'])
 
@@ -504,7 +497,7 @@ def main():
         debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
         teamvulns = TeamVulns(config, team)
         processor = VulnProcessor(config, teamvulns, team)
-        debug('{} assets affected by vulnerabilities with the selected filter.'.format(len(teamvulns.assets)))
+        debug('{} assets affected by vulnerabilities with the selected filter.'.format(processor.get_total_affected_hosts()))
         bug_type_flat(config, team, teamvulns, processor)
 
 if __name__ == "__main__":
