@@ -453,28 +453,13 @@ class TeamVulns():
         print begindateUTC, enddateUTC
         fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
 
-        # Load team queries from our json config.
-        # Lists are "should" unless an item is negated with "!" then it's must_not
-        # Single items are "must"
+        # Setup team query based on our JSON configuration
         query = pyes.query.BoolQuery()
-        query.add_must(pyes.QueryStringQuery('asset.autogroup: "{}"'.format(self.team)))
-        for item in self.config['es'][teamfilter]:
-            # items starting with '_' are internal/reserved, like _time_period
-            if (item.startswith('_')):
-                continue
-            val = self.config['es'][teamfilter][item]
-            if (type(val) == list):
-                for v in val:
-                    if (v.startswith("!")):
-                        query.add_must_not(pyes.MatchQuery(item, v[1:]))
-                    else:
-                        query.add_should(pyes.MatchQuery(item, v))
-            else:
-                if (val.startswith("!")):
-                    query.add_must_not(pyes.MatchQuery(item, val))
-                else:
-                    query.add_must(pyes.MatchQuery(item, val))
-
+        query.add_must(pyes.QueryStringQuery('asset.owner.v2bkey: "{}"'.format(self.team)))
+        # sourcename is a required field
+        if 'sourcename' not in self.config['es'][teamfilter]:
+            raise Exception('sourcename not present in filter')
+        query.add_must(pyes.MatchQuery('sourcename', self.config['es'][teamfilter]['sourcename']))
 
         q = pyes.ConstantScoreQuery(query)
         q = pyes.FilteredQuery(q, pyes.BoolFilter(must=[fDate]))
