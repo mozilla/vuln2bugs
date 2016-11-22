@@ -391,36 +391,16 @@ class TeamVulns():
         self.config = config
         # Get all entries/data from ES/MozDef
         self.raw = self.get_entries()
-        # Sort out assets
+        # Build a dict with our assets
         self.assets = self.get_assets()
-        # Sort out vulnerabilities
-        self.vulnerabilities_per_asset = self.get_vulns_per_asset()
-
-    def get_vulns_per_asset(self):
-        '''Returns a dict-struct like this:
-        vulns_per_asset[assetid] = [vuln, vuln, ...]
-        '''
-        vulns_per_asset = dict()
-
-        for i in self.raw:
-            try:
-                vulns_per_asset[i.asset.assetid] += [i.vuln]
-            except KeyError:
-                vulns_per_asset[i.asset.assetid] = [i.vuln]
-
-        return vulns_per_asset
 
     def get_assets(self):
-        '''Returns unique list of assets from a vuln list'''
-        # For sorting until we get priorities, we use a list instead of a dict
-        # Then deal with the inconveniences ;)
-        assets = list()
-
+        '''Returns dict containing each asset and vulns, using ipaddress as key'''
+        assets = dict()
         for i in self.raw:
-            if not i.asset in assets:
-                assets += [i.asset]
-
-        assets = sorted(assets, key=lambda item: socket.inet_aton(item['ipaddress']))
+            if i.asset.ipaddress in assets:
+                raise Exception('duplicate ipaddress value in asset results')
+            assets[i.asset.ipaddress] = i
 
         return assets
 
