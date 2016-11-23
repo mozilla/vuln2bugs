@@ -183,6 +183,7 @@ class VulnProcessor():
             pkgs    = sorted(set(pkgs))
             impacts = sorted(set(impacts))
             cves    = sorted(set(cves))
+            titles  = sorted(set(titles))
 
             data = """{nr_vulns} vulnerabilities for {hostname} {ipv4}
 
@@ -190,8 +191,7 @@ Impact: {impact}
 CVES: {cve}
 OS: {osname}
 Packages to upgrade: {packages}
--------------------------------------------------------------------------------------
-
+Summary:
 """.format(hostname     = assetdata.asset.hostname,
                 ipv4        = assetdata.asset.ipaddress,
                 nr_vulns    = len(assetdata.vulnerabilities),
@@ -200,6 +200,9 @@ Packages to upgrade: {packages}
                 osname      = assetdata.asset.os,
                 packages    = str.join(',', pkgs),
                 )
+            for v in titles:
+                data += '{title}\n'.format(title=v)
+            data += '\n-----------------------------------------------------\n\n'
 
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=assetdata.asset.hostname, \
                     ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
