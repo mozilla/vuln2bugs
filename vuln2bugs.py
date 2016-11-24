@@ -220,6 +220,12 @@ class TeamVulns():
         # Build a dict with our assets
         self.assets = self.get_assets()
 
+    def nodata(self):
+        '''Return true if no data was found for the team (no assets located in query)'''
+        if len(self.assets.keys()) == 0:
+            return True
+        return False
+
     def get_assets(self):
         '''Returns dict containing each asset and vulns, using ipaddress as key'''
         assets = dict()
@@ -493,6 +499,9 @@ def main():
             teams[team]['name'] = team
         debug('Processing team: {} using filter {}'.format(team, teams[team]['filter']))
         teamvulns = TeamVulns(config, team)
+        if teamvulns.nodata():
+            debug('no asset data found! not performing any action for this team')
+            continue
         processor = VulnProcessor(config, teamvulns, team)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(processor.get_total_affected_hosts()))
         bug_type_flat(config, team, teamvulns, processor)
