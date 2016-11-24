@@ -288,12 +288,6 @@ def bug_type_flat(config, team, teamvulns, processor):
     ba[1].file_name = 'detailled_list.txt'
     ba[1].summary = 'Details including CVEs, OS, etc. affected'
     ba[1].data = full_text
-    if 'includeservices' in teamcfg and teamcfg['includeservices']:
-        ba.append(bugzilla.DotDict())
-        # Include the services related attachment
-        ba[2].file_name = 'extended_list.txt'
-        ba[2].summary = 'CSV list using service information'
-        ba[2].data = withservices_csv
 
     today = toUTC(datetime.now())
     sla = today + timedelta(days=SLADAYS)
