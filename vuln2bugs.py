@@ -159,8 +159,8 @@ class VulnProcessor():
         total_affected_hosts = 0
 
         # Unroll all vulns
-        for assetip in assets:
-            assetdata = assets[assetip]
+        for assetkey in sorted(assets.keys()):
+            assetdata = assets[assetkey]
             impacts = list()
             pkgs = list()
             titles = list()
@@ -216,6 +216,7 @@ class TeamVulns():
     def __init__(self, config, team):
         self.team = team
         self.config = config
+        self.teamconfig = self.config['teamsetup'][team]
         # Get all entries/data from ES/MozDef
         self.raw = self.get_entries()
         # Build a dict with our assets
@@ -228,12 +229,16 @@ class TeamVulns():
         return False
 
     def get_assets(self):
-        '''Returns dict containing each asset and vulns, using ipaddress as key'''
+        '''Returns dict containing each asset and vulns, using hostname and ipaddress as key'''
         assets = dict()
         for i in self.raw:
-            if i.asset.ipaddress in assets:
-                raise Exception('duplicate ipaddress value in asset results')
-            assets[i.asset.ipaddress] = i
+            if 'deduphostname' in self.teamconfig and self.teamconfig['deduphostname']:
+                if i.asset.hostname in [x.split('|')[1] for x in assets.keys()]:
+                    continue
+            key = i.asset.ipaddress + "|" + i.asset.hostname
+            if key in assets:
+                raise Exception('duplicate ipaddress|hostname value in asset results')
+            assets[key] = i
 
         return assets
 
