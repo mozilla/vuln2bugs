@@ -173,7 +173,10 @@ class VulnProcessor():
             for v in assetdata['vulnerabilities']:
                 impacts     += [v.risk.upper()]
                 titles      += [v.name]
-                pkgs        += v.vulnerable_packages
+                if len(v.vulnerable_packages) == 0:
+                    pkgs += ['some_unknown_packages_see_details']
+                else:
+                    pkgs += v.vulnerable_packages
                 if v.cve != None:
                     cves += [v.cve]
                 else:
