@@ -271,6 +271,8 @@ class TeamVulns():
         shoulds = []
 
         query = Q('bool', must=musts, must_not=must_nots, should=shoulds)
+        # XXX esdsl appears to limit queries to a maximum of 10000 results; just hardcode the max
+        # here for now but this should probably be modified to use some sort of scroll cursor.
         results = Search(using=es, index=self.config['es']['index']).params(size=10000).filter(query).execute()
 
         if results._shards.failed != 0:
