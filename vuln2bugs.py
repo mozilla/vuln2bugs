@@ -152,6 +152,15 @@ class VulnProcessor():
     def get_short_csv(self):
         return self.short_csv
 
+    def shorten_package(self, pkgname):
+        '''Attempt to shorten a package to just the name; uses patterns of some known
+        package formats, if pkgname does not match any known formats it will just return
+        pkgname'''
+        mg = re.match('^(.+?)[.\-_]\d+?[.\-_]?', pkgname)
+        if mg == None or len(mg.groups()) != 1:
+            return pkgname
+        return mg.group(1)
+
     def process_vuln_flatmode(self, teamcfg, assets):
         '''Preparser that could use some refactoring.'''
         textdata = ''
@@ -177,7 +186,7 @@ class VulnProcessor():
                 if len(v.vulnerable_packages) == 0:
                     pkgs += ['some_unknown_packages_see_details']
                 else:
-                    pkgs += v.vulnerable_packages
+                    pkgs += [self.shorten_package(x) for x in v.vulnerable_packages]
                 if v.cve != None:
                     cves += [v.cve]
                 else:
