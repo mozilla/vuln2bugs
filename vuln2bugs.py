@@ -217,7 +217,6 @@ Summary:
                 data += '{title}\n'.format(title=v)
             data += '\n-----------------------------------------------------\n\n'
 
-            short_list += "# {hostname}\n".format(hostname=assetdata.asset.hostname)
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=assetdata.asset.hostname, \
                     ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
             textdata += data
