@@ -47,7 +47,8 @@
 #    "scan_end": "2016-11-21T20:41:11+00:00"
 #  }
 
-import pyes
+from elasticsearch import Elasticsearch
+from elasticsearch_dsl import Search, Q
 import sys, os
 from pyes.es import ES
 import pytz
@@ -257,7 +258,7 @@ class TeamVulns():
     def get_entries(self):
         '''Get all entries for a team + their filter from ES/MozDef'''
         teamfilter = self.config['teamsetup'][self.team]['filter']
-        es = ES((self.config['mozdef']['proto'], self.config['mozdef']['host'], self.config['mozdef']['port']))
+        es = Elasticsearch([{'host': self.config['mozdef']['host'], 'port': self.config['mozdef']['port']}])
 
         # Default filter - time period
         try:
@@ -268,33 +269,26 @@ class TeamVulns():
         begindateUTC = toUTC(datetime.now() - timedelta(hours=td))
         enddateUTC= toUTC(datetime.now())
         print begindateUTC, enddateUTC
-        fDate = pyes.RangeQuery(qrange=pyes.ESRange('utctimestamp', from_value=begindateUTC, to_value=enddateUTC))
+        range_query = Q('range', **{'utctimestamp': {'gte': begindateUTC, 'lte': enddateUTC}})
 
         # Setup team query based on our JSON configuration
-        query = pyes.query.BoolQuery()
-        query.add_must(pyes.QueryStringQuery('asset.owner.v2bkey: "{}"'.format(self.team)))
-        # sourcename is a required field
-        if 'sourcename' not in self.config['es'][teamfilter]:
-            raise Exception('sourcename not present in filter')
-        query.add_must(pyes.MatchQuery('sourcename', self.config['es'][teamfilter]['sourcename']))
+        musts = []
+        musts.append(range_query)
+        musts.append(Q('query_string', query='asset.owner.v2bkey: "{}"'.format(self.team)))
+        musts.append(Q('match', sourcename=self.config['es'][teamfilter]['sourcename']))
+        must_nots = []
+        shoulds = []
 
-        q = pyes.ConstantScoreQuery(query)
-        q = pyes.FilteredQuery(q, pyes.BoolFilter(must=[fDate]))
+        query = Q('bool', must=musts, must_not=must_nots, should=shoulds)
+        # XXX esdsl appears to limit queries to a maximum of 10000 results; just hardcode the max
+        # here for now but this should probably be modified to use some sort of scroll cursor.
+        results = Search(using=es, index=self.config['es']['index']).params(size=10000).filter(query).execute()
 
-        results = es.search(query=q, indices=self.config['es']['index'])
-
-        raw = results._search_raw(0, results.count())
-        # This doesn't do much, but pyes has no "close()" or similar functionality.
-        es.force_bulk()
-
-        if (raw._shards.failed != 0):
+        if results._shards.failed != 0:
             raise Exception("Some shards failed! {0}".format(raw._shards.__str__()))
 
-        # Nobody cares for the metadata past this point (all the goodies are in '_source')
-        data = []
-        for i in raw.hits.hits:
-            data += [i._source]
-        return data
+        # Nobody cares for the metadata past this point (all the goodies are in 'hits')
+        return results.hits
 
 
 def bug_type_flat(config, team, teamvulns, processor):
