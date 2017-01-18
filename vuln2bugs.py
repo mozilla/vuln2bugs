@@ -175,6 +175,7 @@ class VulnProcessor():
             pkgs = list()
             titles = list()
             cves = list()
+            titlelinkmap = dict()
 
             if len(assetdata['vulnerabilities']) == 0:
                 continue
@@ -191,6 +192,10 @@ class VulnProcessor():
                     cves += [v.cve]
                 else:
                     cves += ['CVE-NOTAVAILABLE']
+                try:
+                    titlelinkmap[v.name] = v.link
+                except AttributeError:
+                    pass
 
             # Uniquify
             pkgs    = sorted(set(pkgs))
@@ -214,7 +219,11 @@ Summary:
                 packages    = str.join(',', pkgs),
                 )
             for v in titles:
-                data += '{title}\n'.format(title=v)
+                data += '{title}'.format(title=v)
+                if v in titlelinkmap:
+                    data += ' ({link})\n'.format(link=titlelinkmap[v])
+                else:
+                    data += '\n'
             data += '\n-----------------------------------------------------\n\n'
 
             short_list += "{hostname},{ip},{pkg}\n".format(hostname=assetdata.asset.hostname, \
