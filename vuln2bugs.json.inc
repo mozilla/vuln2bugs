@@ -19,11 +19,9 @@
 	//Set to link to include to service-map raw owners list
 	"eisowners": "https://service-map/api/v1/owners",
 
-	//These teams need to exist (autogroup in mozdef)
+	//These teams need to exist (asset.owner.v2bkey in mozdef event)
 	//Note that the opposite can also happen where teams get created in mozdef, but not configured here
 	//Either way missing or extra teams will not get bugs assigned, of course.
-	//If includeservices is in a team configuration and set to true, extended service information will be
-	//incorporated with the bug if it is available
 	"teamsetup": {
 		"myteam": {
 			"name": "nicerteamname",
@@ -41,43 +39,24 @@
 	//Filters, etc. settings
 	"es": {
 		"index": "vulnerabilities",
-		//You can add any filter you want here as long as the value exists in MozDef
-		//Because ES uses "must" "must not" and "should" instead of "and" and "or", you have to ensure your filter is very precise.
-		//In particular if an item can have many values, make sure you negate the values that you never want to see.
-		//_time_period is a special filter, which indicates the time period over which vulnerability documents are scanned for.
-		"most-critical-only": {
+		// Here you can add filters to filter out vulnerabilities that do not match
+		// the specified criteria for processing.
+		//
+		// Required:
+		// _time_period: How far back to query (hours)
+		// sourcename:   query for vulnerabilities with specified sourcename
+		//
+		// Optional:
+		// mincvss: Vulnerabilities must have at least specified CVSS value, defaults
+		//          to 0 if not specified.
+		"default-filter": {
 			"_time_period": 24,
-			"sourcename": "production",
-			"vuln.status": "open",
-			//CVSS filter, see http://en.wikipedia.org/wiki/CVSS if you're not familiar with it
-			"vuln.cvss_vector.access_complexity": ["low", "!medium", "!high"],			//high, medium, low
-			"vuln.cvss_vector.access_vector": ["!local", "!adjacentnetwork", "network"],		//local, adjacent network, network
-			"vuln.cvss_vector.authentication": ["none", "single", "!multiple"],			//none, single, multiple
-			"vuln.cvss_vector.confidentiality_impact": ["!none", "partial", "complete"],		//none, partial, complete
-			"vuln.cvss_vector.integrity_impact": ["!none", "partial", "complete"],			//none, partial, complete
-			"vuln.cvss_vector.availability_impact": ["!none", "partial", "complete"],		//none, partial, complete
-			"vuln.impact_label": ["!mediumlow", "!high", "maximum"],				//mediumlow, high, maximum (OpSec Levels)
-			"vuln.known_exploits": "True"
-		},
-		"important-and-critical-only": {
-			"_time_period": 24,
-			"sourcename": "production",
-			"vuln.status": "open"
-			//CVSS filter, see http://en.wikipedia.org/wiki/CVSS if you're not familiar with it
-			"vuln.cvss_vector.access_complexity": ["low", "medium", "!high"],			//high, medium, low
-			"vuln.cvss_vector.access_vector": ["local", "adjacentnetwork", "network"],		//local, adjacent network, network
-			"vuln.cvss_vector.authentication": ["none", "single", "multiple"],			//none, single, multiple
-			"vuln.cvss_vector.confidentiality_impact": ["!none", "partial", "complete"],		//none, partial, complete
-			"vuln.cvss_vector.integrity_impact": ["!none", "partial", "complete"],			//none, partial, complete
-			"vuln.cvss_vector.availability_impact": ["!none", "partial", "complete"],		//none, partial, complete
-			"vuln.impact_label": ["!mediumlow", "high", "maximum"]				//mediumlow, high, maximum (OpSec Levels)
-
+			"mincvss": 5.0,
+			"sourcename": "scanapi"
 		},
 		"all-vulnerabilities": {
 			"_time_period": 24,
-			"sourcename": "production",
-			"vuln.status": "open"
-
+			"sourcename": "scanapi"
 		}
 	}
 }
