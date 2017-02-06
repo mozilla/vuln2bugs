@@ -168,6 +168,14 @@ class VulnProcessor():
         pkg_affected = dict()
         total_affected_hosts = 0
 
+        try:
+            mincvss = float(self.config['es'][teamcfg['filter']]['mincvss'])
+        except KeyError:
+            mincvss = None
+        try:
+            risklabels = self.config['es'][teamcfg['filter']]['risklabels']
+        except KeyError:
+            risklabels = None
         # Unroll all vulns
         for assetkey in sorted(assets.keys()):
             assetdata = assets[assetkey]
@@ -176,6 +184,15 @@ class VulnProcessor():
             titles = list()
             cves = list()
             titlelinkmap = dict()
+
+            # Apply any CVSS filters
+            if mincvss != None:
+                assetdata['vulnerabilities'] = [x for x in assetdata['vulnerabilities'] \
+                        if 'cvss' in x and x['cvss'] != '' and float(x['cvss']) >= mincvss]
+            # Apply any label filters
+            if risklabels != None:
+                assetdata['vulnerabilities'] = [x for x in assetdata['vulnerabilities'] \
+                        if 'risk' in x and x['risk'] in risklabels]
 
             if len(assetdata['vulnerabilities']) == 0:
                 continue

@@ -49,9 +49,12 @@
 		// Optional:
 		// mincvss: Vulnerabilities must have at least specified CVSS value, defaults
 		//          to 0 if not specified.
+		// risklabels: The risk label in the vulnerability must be set to a value in
+		//             risklabels to be escalated
 		"default-filter": {
 			"_time_period": 24,
 			"mincvss": 5.0,
+			"risklabels": ["high", "critical"],
 			"sourcename": "scanapi"
 		},
 		"all-vulnerabilities": {
