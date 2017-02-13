@@ -19,6 +19,27 @@
 	//Set to link to include to service-map raw owners list
 	"eisowners": "https://service-map/api/v1/owners",
 
+	// Can be defined to create a bug indicating any vulnerabilities filtered for
+	// various team configurations. If this is omitted, no filter report will be
+	// created. If present, any teams you wish to include in the filter report must
+	// have "reportfiltered" set to true in their configuration.
+	//
+	// if an exceptions file is present, this file can include a list of vulnerability
+	// names tha will never be filtered. In this file, comments are permitted with # and
+	// each line should be <teamname> <regexp>. teamname can be * to apply globally.
+	"filteredreport": {
+		// Must be configured to run on a specific day, 0 == Mon ... 6 == Sun
+		"weeklyrun": 0,
+		"product": "myproduct",
+		"component": "mycomponent",
+		"groups": [""],
+		"status": "NEW",
+		"priority": "P1",
+		"version": "other",
+		"severity": "major",
+		"exceptions": "/path/to/exceptions/file.txt"
+	},
+
 	//These teams need to exist (asset.owner.v2bkey in mozdef event)
 	//Note that the opposite can also happen where teams get created in mozdef, but not configured here
 	//Either way missing or extra teams will not get bugs assigned, of course.
@@ -26,6 +47,9 @@
 		"myteam": {
 			"name": "nicerteamname",
 			"filter": "most-critical-only",
+			// reportfiltered is optional, if set to true any filter report bugs created
+			// will include details for this team
+			"reportfiltered": false,
 			"product": "myproduct",
 			"component": "mycomponent",
 			"groups": [""],

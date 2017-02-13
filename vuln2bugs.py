@@ -102,8 +102,10 @@ def toUTC(suspectedDate, localTimeZone=None):
 
     return objDate
 
-def bug_create(config, team, teamcfg, title, body, attachments):
-    '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup' '''
+def bug_create(config, team, teamcfg, title, body, attachments, whiteboard=True):
+    '''This will create a Bugzilla bug using whatever settings you have for a team in 'teamsetup',
+    you will pretty much always want whiteboard set to True unless this is a bug that should not
+    be managed by vuln2bugs (e.g., filter report bugs)'''
     url = config['bugzilla']['host']
     b = bugzilla.Bugzilla(url=url+'/rest/', api_key=config['bugzilla']['api_key'])
 
@@ -117,7 +119,8 @@ def bug_create(config, team, teamcfg, title, body, attachments):
     bug.description = body
     today = toUTC(datetime.now())
     sla = today + timedelta(days=SLADAYS)
-    bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-key={}'.format(sla.strftime('%Y-%m-%d'), team)
+    if whiteboard:
+        bug.whiteboard = 'autoentry v2b-autoclose v2b-autoremind v2b-duedate={} v2b-key={}'.format(sla.strftime('%Y-%m-%d'), team)
     bug.priority = teamcfg['priority']
     bug.severity = teamcfg['severity']
     bug = b.post_bug(bug)
@@ -132,10 +135,14 @@ class VulnProcessor():
     def __init__(self, config, teamvulns, team):
         self.teamvulns = teamvulns
         self.config = config
-        a, b, c = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
+        self.filtered_text_output = ''
+        a, b, c, d = self.process_vuln_flatmode(config['teamsetup'][team], teamvulns.assets)
         self.full_text_output = a
         self.short_csv = b
         self.total_affected_hosts = c
+        self.filtered_asset_vulns = d
+        # Populate filtered_text_output using the data in filtered_asset_vulns
+        self.proc_filtered_vulns(config['teamsetup'][team])
 
     def summarize(self, data, dlen=64):
         '''summarize any string longer than dlen to dlen+ (truncated)'''
@@ -152,6 +159,9 @@ class VulnProcessor():
     def get_short_csv(self):
         return self.short_csv
 
+    def get_filtered_vulns_segment(self):
+        return self.filtered_text_output
+
     def shorten_package(self, pkgname):
         '''Attempt to shorten a package to just the name; uses patterns of some known
         package formats, if pkgname does not match any known formats it will just return
@@ -161,12 +171,43 @@ class VulnProcessor():
             return pkgname
         return mg.group(1)
 
+    def filter_exception(self, vulnname, teamname):
+        try:
+            with open(self.config['filteredreport']['exceptions']) as fd:
+                rules = fd.readlines()
+                for x in rules:
+                    if x[0] == '#':
+                        continue
+                    args = x.strip().split()
+                    if args[0] != teamname and args[0] != '*':
+                        continue
+                    if re.match(args[1], vulnname) != None:
+                        return True
+        except IOError:
+            pass
+        return False
+
+    def proc_filtered_vulns(self, teamconfig):
+        '''Create a segment of text suitable to detail the list of vulnerabilities filtered
+        from the bug for this team. The format here could be improved. The granularity of
+        function input is asset based, but we will collapse all of the data into a unique
+        list of vulnerability titles'''
+        vlist = []
+        self.filtered_text_output += '########## Filtered for {}\n'.format(teamconfig['name'])
+        for x in self.filtered_asset_vulns:
+            vlist += self.filtered_asset_vulns[x].keys()
+        if len(vlist) == 0:
+            self.filtered_text_output += 'None\n\n'
+        else:
+            self.filtered_text_output += '\n'.join(sorted(set(vlist))) + '\n'
+
     def process_vuln_flatmode(self, teamcfg, assets):
         '''Preparser that could use some refactoring.'''
         textdata = ''
         short_list = ''
         pkg_affected = dict()
         total_affected_hosts = 0
+        filtered_asset_vulns = {}
 
         try:
             mincvss = float(self.config['es'][teamcfg['filter']]['mincvss'])
@@ -185,14 +226,30 @@ class VulnProcessor():
             cves = list()
             titlelinkmap = dict()
 
+            # vulns_filtered will track any vulnerabilities that are filtered from the
+            # output
+            vulns_filtered = {}
             # Apply any CVSS filters
             if mincvss != None:
-                assetdata['vulnerabilities'] = [x for x in assetdata['vulnerabilities'] \
-                        if 'cvss' in x and x['cvss'] != '' and float(x['cvss']) >= mincvss]
+                buf = []
+                for x in assetdata['vulnerabilities']:
+                    if self.filter_exception(x['name'], teamcfg['name']) or \
+                            ('cvss' in x and x['cvss'] != '' and float(x['cvss']) >= mincvss):
+                        buf.append(x)
+                    else:
+                        vulns_filtered[x['name']] = x
+                assetdata['vulnerabilities'] = buf
             # Apply any label filters
             if risklabels != None:
-                assetdata['vulnerabilities'] = [x for x in assetdata['vulnerabilities'] \
-                        if 'risk' in x and x['risk'] in risklabels]
+                buf = []
+                for x in assetdata['vulnerabilities']:
+                    if self.filter_exception(x['name'], teamcfg['name']) or \
+                            ('risk' in x and x['risk'] in risklabels):
+                        buf.append(x)
+                    else:
+                        vulns_filtered[x['name']] = x
+                assetdata['vulnerabilities'] = buf
+            filtered_asset_vulns[assetdata['asset']['hostname']] = vulns_filtered
 
             if len(assetdata['vulnerabilities']) == 0:
                 continue
@@ -247,7 +304,7 @@ Summary:
                     ip=assetdata.asset.ipaddress, pkg=str.join(' ', pkgs))
             textdata += data
 
-        return (textdata, short_list, total_affected_hosts)
+        return (textdata, short_list, total_affected_hosts, filtered_asset_vulns)
 
 class TeamVulns():
     '''TeamVulns extract the vulnerability data from MozDef and sorts it into clear structures'''
@@ -315,6 +372,28 @@ class TeamVulns():
         # Nobody cares for the metadata past this point (all the goodies are in 'hits')
         return results.hits
 
+def create_filtered_bug(config, filterconfig, attach):
+    '''Creates a bug listing all vulnerabilities filtered from vuln2bugs reports for any
+    teams with filter reporting enabled. Note that vuln2bugs does not manage this bug and
+    it needs to be closed manually once reviewed.'''
+    if filterconfig['weeklyrun'] != toUTC(datetime.now()).weekday():
+        return
+    debug('Creating filter report bug')
+    ba = [bugzilla.DotDict()]
+    ba[0].file_name = 'filtered_vulns.txt'
+    ba[0].summary = 'List of vulnerabilities filtered for teams with filter reporting enabled'
+    ba[0].data = '\n'.join(attach)
+    today = toUTC(datetime.now())
+
+    bug_body = 'Infosec vuln2bugs filtered vulnerabilities report\n\n'
+    bug_body += 'Vulnerabilities filtered by auto-triage policies are detailed in the attachment\n'
+    bug_body += 'for review. An exception should be included in vuln2bugs configuration for any\n'
+    bug_body += 'vulnerabilities listed here that should be auto-triaged.\n\n'
+    bug_body += 'Note this bug only contains filtered issues for teams that have filter reporting\n'
+    bug_body += 'enabled. This bug can be resolved once review is complete.\n'
+
+    bug_title = 'vuln2bugs auto-triage filter report'
+    bug_create(config, None, filterconfig, bug_title, bug_body, ba, whiteboard=False)
 
 def bug_type_flat(config, team, teamvulns, processor):
     teamcfg = config['teamsetup'][team]
@@ -528,6 +607,12 @@ def main():
 
     teams = config['teamsetup']
 
+    try:
+        filteredreport = config['filteredreport']
+    except KeyError:
+        filteredreport = None
+    filteredattachment = []
+
     # Note that the pyes library returns DotDicts which are addressable like mydict['hi'] and mydict.hi
     for team in teams:
         if singleteam != None and team != singleteam:
@@ -541,7 +626,12 @@ def main():
             continue
         processor = VulnProcessor(config, teamvulns, team)
         debug('{} assets affected by vulnerabilities with the selected filter.'.format(processor.get_total_affected_hosts()))
+        if filteredreport != None:
+            if 'reportfiltered' in teams[team] and teams[team]['reportfiltered']:
+                filteredattachment.append(processor.get_filtered_vulns_segment())
         bug_type_flat(config, team, teamvulns, processor)
+    if filteredreport != None and len(filteredattachment) != 0:
+        create_filtered_bug(config, filteredreport, filteredattachment)
 
 if __name__ == "__main__":
     main()
