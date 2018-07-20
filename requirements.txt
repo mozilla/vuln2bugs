@@ -1,5 +1,7 @@
 bugzilla
+elasticsearch
 elasticsearch_dsl
+pyes
 python-dateutil
 requests
 pytz
