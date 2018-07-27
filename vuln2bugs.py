@@ -420,7 +420,7 @@ def bug_type_flat(config, team, teamvulns, processor):
     bug_body += 'bugs. See the attachments for details, attachments are updated based on current\n'
     bug_body += 'state each time vuln2bugs runs.\n'
     bug_body += "\nFor additional details, queries, etc. see also {}".format(config['mozdef']['dashboard_url'])
-    bug_body += "\n\nCurrent ownership mapping for all known hosts can be obtained from {}".format(config['eisowners'])
+    #bug_body += "\n\nCurrent ownership mapping for all known hosts can be obtained from {}".format(config['eisowners'])    #commented out because this function is deprecated
     bug_body += "\n\nEscalation process details can be obtained from {}".format(config['doclink'])
 
     # Only make a new bug if no old one exists
